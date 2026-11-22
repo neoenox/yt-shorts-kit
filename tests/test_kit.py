@@ -1,0 +1,163 @@
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from ytkit import ffmpeg_tools, freevideo, loudness, qa, voicevox
+
+M = {'input_i': '-15.3', 'input_tp': '-1.4', 'input_lra': '4.2', 'input_thresh': '-25.6', 'target_offset': '0.3'}
+LIMITER = 'alimiter=limit=0.79:level=disabled'
+
+
+# ---- loudness: 移行前の各リポジトリが組み立てていた文字列と一致すること
+
+def test_loudnorm_filter_matches_rakuten_two_pass():
+    old = ('loudnorm=I=-14:TP=-1.5:LRA=7:measured_I=%s:measured_TP=%s:measured_LRA=%s'
+           ':measured_thresh=%s:offset=%s:linear=true,alimiter=limit=0.79:level=disabled'
+           % (M['input_i'], M['input_tp'], M['input_lra'], M['input_thresh'], M['target_offset']))
+    assert loudness.loudnorm_filter(M, -14, -1.5, 7, limiter=LIMITER) == old
+
+
+def test_loudnorm_filter_matches_rakuten_single_pass_fallback():
+    assert loudness.loudnorm_filter(None, -14, -1.5, 7, limiter=LIMITER) == \
+        'loudnorm=I=-14:TP=-1.5:LRA=7,alimiter=limit=0.79:level=disabled'
+
+
+def test_loudnorm_filter_matches_rekishikaisetu_vp_two_pass():
+    old = (f"loudnorm=I=-14:TP=-1.5:LRA=9:measured_I={M['input_i']}:measured_TP={M['input_tp']}"
+           f":measured_LRA={M['input_lra']}:measured_thresh={M['input_thresh']}:offset={M['target_offset']}:linear=true")
+    assert loudness.loudnorm_filter(M, -14, -1.5, 9) == old
+
+
+# ---- voicevox
+
+def test_apply_pron_longest_key_first():
+    assert voicevox.apply_pron('本能寺の変', {'本能': 'ほんのう', '本能寺': 'ほんのうじ'}) == 'ほんのうじの変'
+    assert voicevox.apply_pron('abc', None) == 'abc'
+
+
+class _Resp:
+    def __init__(self, data=None, content=b''):
+        self._d, self.content = data, content
+
+    def json(self):
+        return self._d
+
+    def raise_for_status(self):
+        pass
+
+
+def test_synth_sends_same_payload_as_the_old_code(monkeypatch):
+    calls = []
+
+    def fake_get(url, timeout):
+        return _Resp([{'name': '四国めたん', 'styles': [{'name': 'ノーマル', 'id': 2}, {'name': 'あまあま', 'id': 0}]}])
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        calls.append((url, params, json))
+        if url.endswith('/audio_query'):
+            return _Resp({'kana': 'テスト', 'speedScale': 1.0})
+        return _Resp(content=b'WAV')
+
+    monkeypatch.setattr(voicevox.requests, 'get', fake_get)
+    monkeypatch.setattr(voicevox.requests, 'post', fake_post)
+    sid = voicevox.speaker_id('四国めたん', 'ノーマル')
+    assert sid == 2
+    wav, kana = voicevox.synth('テスト', sid, 0.95, intonation=1.08)
+    assert (wav, kana) == (b'WAV', 'テスト')
+    assert calls[0] == ('http://127.0.0.1:50021/audio_query', {'text': 'テスト', 'speaker': 2}, None)
+    body = calls[1][2]
+    assert body == {'kana': 'テスト', 'speedScale': 0.95, 'intonationScale': 1.08,
+                    'prePhonemeLength': 0.1, 'postPhonemeLength': 0.3, 'outputSamplingRate': 24000}
+
+
+def test_speaker_style_falls_back_to_first_and_unknown_speaker_raises(monkeypatch):
+    monkeypatch.setattr(voicevox.requests, 'get',
+                        lambda url, timeout: _Resp([{'name': 'X', 'styles': [{'name': 'a', 'id': 7}]}]))
+    assert voicevox.speaker_id('X', 'ノーマル') == 7
+    with pytest.raises(voicevox.SpeakerNotFound):
+        voicevox.speaker_id('Y')
+
+
+def test_voicevox_url_from_env(monkeypatch):
+    monkeypatch.setenv('VOICEVOX_URL', 'http://example:1')
+    assert voicevox.base_url() == 'http://example:1'
+    assert voicevox.base_url('http://explicit') == 'http://explicit'
+
+
+# ---- ffmpeg_tools
+
+def test_find_ffmpeg_order(tmp_path, monkeypatch):
+    a, b, c = (tmp_path / n for n in ('a.exe', 'b.exe', 'c.exe'))
+    for f in (a, b, c):
+        f.write_text('x')
+    monkeypatch.delenv('FFMPEG', raising=False)
+    monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
+    assert ffmpeg_tools.find_ffmpeg(fallback=[str(c)]) == str(c)
+    assert ffmpeg_tools.find_ffmpeg(prefer=[str(b)], fallback=[str(c)]) == str(b)
+    monkeypatch.setenv('FFMPEG', str(a))
+    assert ffmpeg_tools.find_ffmpeg(prefer=[str(b)]) == str(a)
+
+
+def test_find_ffmpeg_not_found(monkeypatch):
+    monkeypatch.delenv('FFMPEG', raising=False)
+    monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
+    with pytest.raises(ffmpeg_tools.FFmpegNotFound):
+        ffmpeg_tools.find_ffmpeg()
+
+
+def test_find_ffprobe_uses_sibling_then_default(tmp_path, monkeypatch):
+    monkeypatch.delenv('FFPROBE', raising=False)
+    monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
+    ff = tmp_path / 'ffmpeg.exe'
+    ff.write_text('x')
+    assert ffmpeg_tools.find_ffprobe(str(ff), default=str(ff)) == str(ff)
+    (tmp_path / 'ffprobe.exe').write_text('x')
+    assert ffmpeg_tools.find_ffprobe(str(ff)) == str(tmp_path / 'ffprobe.exe')
+    assert ffmpeg_tools.find_ffprobe(None, default='ffprobe') == 'ffprobe'
+
+
+# ---- freevideo
+
+def test_freevideo_graph_and_video_of(tmp_path):
+    g = freevideo.graph('a scene', 544, 960, 7, seed=5)
+    inp = g['1']['inputs']
+    assert (inp['text'], inp['width'], inp['height'], inp['seconds'], inp['seed']) == ('a scene', 544, 960, 7.0, 5)
+    assert g['1']['inputs']['media'] == ['2', 0] and g['2']['class_type'] == 'FreeVideoMedia'
+    entry = {'outputs': {'1': {'images': [{'filename': 'x.png'}, {'filename': 'v.mp4', 'subfolder': 's'}]}}}
+    assert freevideo.video_of(entry, tmp_path) == tmp_path / 's' / 'v.mp4'
+    assert freevideo.video_of({'outputs': {}}, tmp_path) is None
+
+
+# ---- 実際の ffmpeg を使う検査（ffmpeg が無ければ飛ばす）
+
+FF = shutil.which('ffmpeg') or next((str(p) for p in [Path('E:/rekishikaisetu-honnoji/tools/ffmpeg/bin/ffmpeg.exe')] if p.exists()), None)
+
+
+@pytest.mark.skipif(not FF, reason='ffmpeg が無い')
+def test_black_spans_detects_black_and_clean_video(tmp_path):
+    blk, ok = tmp_path / 'blk.mp4', tmp_path / 'ok.mp4'
+    subprocess.run([FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=320x240:d=2,format=yuv420p',
+                    '-f', 'lavfi', '-i', 'color=c=black:s=320x240:d=1.5,format=yuv420p',
+                    '-f', 'lavfi', '-i', 'color=c=white:s=320x240:d=1,format=yuv420p',
+                    '-filter_complex', '[0][1][2]concat=n=3:v=1:a=0', str(blk)], check=True)
+    subprocess.run([FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=white:s=320x240:d=3,format=yuv420p',
+                    str(ok)], check=True)
+    spans = qa.black_spans(blk, FF)
+    assert len(spans) == 1 and spans[0][0] == pytest.approx(2.0, abs=0.1) and spans[0][1] == pytest.approx(1.5, abs=0.1)
+    assert qa.black_spans(ok, FF) == []
+
+
+@pytest.mark.skipif(not FF, reason='ffmpeg が無い')
+def test_measure_ebur128_on_silence_and_probe_duration(tmp_path):
+    w = tmp_path / 's.wav'
+    subprocess.run([FF, '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', str(w)], check=True)
+    i, p = loudness.measure_ebur128(w, FF)
+    assert i is not None and -40 < i < 0 and p is not None
+    probe = ffmpeg_tools.find_ffprobe(FF, default=None)
+    if probe:
+        assert ffmpeg_tools.probe_duration(w, probe) == pytest.approx(2.0, abs=0.1)
+    m = loudness.measure_loudnorm(w, FF, lra=7)
+    assert m is not None and 'input_i' in m
