@@ -25,6 +25,14 @@ def test_load_config_reads_toml_and_missing_file_is_named(tmp_path):
     assert 'channel.toml' in str(e.value) and 'YT_PROJECT_ROOT' in str(e.value)
 
 
+def test_section_returns_requested_keys_and_names_the_missing_one():
+    cfg = {'voice': {'speaker': 'A', 'style': 'B', 'extra': 1}}
+    assert project.section(cfg, 'voice', ('speaker', 'style')) == {'speaker': 'A', 'style': 'B'}
+    with pytest.raises(project.ConfigError) as e:
+        project.section(cfg, 'voice', ('speaker', 'speed'))
+    assert 'voice.speed' in str(e.value)
+
+
 def test_require_returns_value_and_names_the_missing_key():
     cfg = {'channel': {'name': 'A'}, 'bgm': {}}
     assert project.require(cfg, 'channel.name') == 'A'

@@ -42,6 +42,12 @@ def load_config(root, name=CONFIG_NAME):
     return _load(str(p))
 
 
+def section(cfg, name, keys):
+    """設定の1節から、必要なキーだけを dict で取り出す。足りないキーは ConfigError(キー名つき)。
+    呼び出し側は実行時にこの dict を引くので、書き換えると反映される(テストで差し替えやすい)。"""
+    return {k: require(cfg, f'{name}.{k}') for k in keys}
+
+
 def require(cfg, dotted):
     """'channel.name' のような経路で値を取り出す。無ければ ConfigError(足りないキー名つき)。"""
     cur = cfg
