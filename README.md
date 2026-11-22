@@ -37,6 +37,22 @@ python -m pip install -e E:\yt-shorts-kit
 
 使うリポジトリごとの環境（`.venv` など）に入れる。
 
+## GitHub から入れる（新しい環境・他のパソコン）
+公開リポジトリ: https://github.com/neoenox/yt-shorts-kit
+
+```powershell
+uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@master"
+```
+
+版を固定したいときは、`@master` を、タグかコミットのハッシュにする(例: `@v0.2.0`、`@6328386`)。
+プロジェクト側の `scripts/setup.ps1` は、隣のフォルダーに `yt-shorts-kit` があれば編集可能で、無ければここから入れる。
+
+## 運用
+- **コアを直すのは、このリポジトリだけ**。プロジェクト側の `scripts/<名前>.py` は薄い入口(shim)なので、直さない。
+- 編集可能インストールでは、ここを直すと、使っているプロジェクトにすぐ反映される。動画を作っている最中に、未コミットの編集を置いたままにしない。
+- 直したら、`pytest` を、ここと使っているプロジェクトの両方で回す。両方に変更が要るときは、**ここを先にコミット・push** してから、プロジェクト側をコミットする。
+- 履歴を書き換えない(公開済みのため)。メールアドレスは GitHub の noreply アドレスにしてある。
+
 ## 環境変数
 `FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）。
 
