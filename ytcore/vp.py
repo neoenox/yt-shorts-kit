@@ -9,15 +9,15 @@ Scene item types (all optional 'at' = sentence index at which the item appears, 
 from pathlib import Path
 import json,subprocess,sys,math,os,re,hashlib,time,wave,shutil
 import numpy as np
-sys.path.insert(0,str(Path(__file__).resolve().parent))
-from hn_text import display
-from thin_commas import thin
+from ytcore import hn_text,thin_commas,rich_text as rich
+from ytcore.hn_text import display
+from ytcore.thin_commas import thin
 from PIL import Image,ImageDraw,ImageFont
-import rich_text as rich
 from ytkit.project import project_root,load_config,section,require   # 共通部品（E:\yt-shorts-kit）
 ROOT=project_root(__file__);CFG=load_config(ROOT)   # チャンネル設定 ROOT/channel.toml（環境変数 YT_PROJECT_ROOT でプロジェクトの場所を変えられる）
 CH=section(CFG,'channel',('about','terms_check'));VOICE=section(CFG,'voice',('speaker','style','speed','label','credit_long'));BGM=section(CFG,'bgm',('dir','pattern','credit_long'));BGM_NAMES=require(CFG,'bgm.names');FONTS=section(CFG,'fonts',('dir','sans','serif'))
 FD=FONTS['dir'];BASE='http://127.0.0.1:50021';SPEED=VOICE['speed']
+PLUGIN_DIR=ROOT/require(CFG,'project.plugin_dir');sys.path.insert(0,str(PLUGIN_DIR))   # プロジェクト側のプラグイン（vp_anim*・make_upload_pack・ffmpeg_skill_check）を import できるように。置き場所は channel.toml の [project] plugin_dir
 XFADE=0.35  # 章の切れ目のクロスフェード（秒）
 BG=(7,24,36,240);GOLD=(239,201,118);WHITE=(245,243,232);DIM=(190,205,208);EDGE=(176,153,100);NAVY=(9,22,34);ORG=(255,150,90);BLUE=(120,190,255);VIO=(170,135,255);GRN=(120,210,150);RED=(235,90,80)
 COL={'gold':GOLD,'white':WHITE,'dim':DIM,'org':ORG,'blue':BLUE,'vio':VIO,'grn':GRN,'red':RED}
@@ -602,7 +602,7 @@ def loud_args(path):
 def _code_fp():
     """描画に関わるコード全体の指紋（コードが変わったら、全部品を作り直す）"""
     h=hashlib.sha1()
-    for f in sorted(list(P('scripts').glob('vp*.py'))+[Path(sys.modules[m].__file__) for m in ('hn_text','thin_commas','rich_text')],key=lambda f:f.name):   # 実体は ytcore（shim ではなく中身の指紋を取る）。名前順にして、移す前と同じ並びで指紋を取る
+    for f in sorted([Path(__file__)]+list(PLUGIN_DIR.glob('vp_anim*.py'))+[Path(m.__file__) for m in (hn_text,thin_commas,rich)],key=lambda f:f.name):   # 実体は ytcore（shim ではなく中身の指紋を取る）。名前順にして、移す前と同じ並びで指紋を取る
         if f.name.startswith(('vp_before','vp_check','vp_preview','vp_lock','vp_remix')) or not f.exists():continue
         b=f.read_bytes().replace(b'\r',b'')   # 行末(CRLF/LF)は、チェックアウトの設定でツリーごとに違う。指紋は内容だけで取る
         if f.name=='vp.py':   # vp.py は、描画の部分（text helpers〜stages）だけを見る。コマンドや段取りの変更で、部品を作り直さない
@@ -636,14 +636,14 @@ def stage_build(chunk=1000,bgm_db=-6.0):
     for f in list(P('cache').glob(f'{SLUG}_part_*.mp4'))+list(P('cache').glob(f'{SLUG}_part_*.fp')):   # 部品の長さが違う古い部品は、結合に混ざらないよう消す
         if f.stem not in want:f.unlink()
     print(f'parts: {len(fps)} (reuse {reused}, render {len(pending)})',flush=True)
-    import vp_lock
+    from ytcore import vp_lock
     maxpar=int(os.environ['VP_MAXPAR']) if os.environ.get('VP_MAXPAR') else vp_lock.share_maxpar(ROOT,SLUG)   # 別の build が動いていれば、並列数を分け合う
     running=[];rc=[];tries={};why=[]
     TRANSIENT=('Could not open encoder','OpenEncodeSessionEx','No capable devices','NVENC','nvenc','CUDA_ERROR','out of memory')
     while pending or running:   # NVENC の同時セッションは8本まで（14本同時だと、Could not open encoder で落ちる）
         while pending and not why and len(running)<maxpar:
             a=pending.pop(0);ef=P(f'cache/{SLUG}_part_{a}.err');fh=open(ef,'w',encoding='utf8')
-            running.append((a,subprocess.Popen([sys.executable,str(Path(__file__)),SLUG,'part',str(a),str(a+chunk)],cwd=str(ROOT),env={**os.environ,'PYTHONIOENCODING':'utf8'},stderr=fh),fh,ef))
+            running.append((a,subprocess.Popen([sys.executable,'-m','ytcore.vp',SLUG,'part',str(a),str(a+chunk)],cwd=str(ROOT),env={**os.environ,'PYTHONIOENCODING':'utf8'},stderr=fh),fh,ef))
         _t.sleep(1)
         for q_ in [q for q in running if q[1].poll() is not None]:
             running.remove(q_);q_[2].close();err=q_[3].read_text(encoding='utf8',errors='replace') if q_[3].exists() else ''
@@ -755,7 +755,7 @@ def stage_pack():
 if __name__=='__main__':
     slug,cmd=sys.argv[1],sys.argv[2];load_spec(slug)
     if cmd in ('build','audio','prep'):
-        import vp_lock;vp_lock.acquire(ROOT,slug,cmd)   # 二重起動を防ぐ
+        from ytcore import vp_lock;vp_lock.acquire(ROOT,slug,cmd)   # 二重起動を防ぐ
     if cmd=='part':load_runtime();render_part(int(sys.argv[3]),int(sys.argv[4]))
     elif cmd=='story':stage_story()
     elif cmd=='still':
@@ -767,17 +767,17 @@ if __name__=='__main__':
         for c in TL:
             ss=[x for x in SEGS if x['scene']==c['id']];print(c['key'],[round(x['start']+0.8,1) for x in ss])
     elif cmd=='lint':
-        import script_lint;raise SystemExit(script_lint.run(globals()))
+        from ytcore import script_lint;raise SystemExit(script_lint.run(globals()))
     elif cmd=='prep':   # 台本→読み→音声→BGM→検査まで一括（描画の前の準備。止まる所があれば、そこで止まる）
-        import vp_check,script_lint
+        from ytcore import vp_check,script_lint
         stage_story();script_lint.run(globals());stage_kana();stage_audio();stage_bgm()
         raise SystemExit(vp_check.run(globals()))
     elif cmd=='preview':
-        load_runtime();import vp_preview;raise SystemExit(vp_preview.run(globals()))
+        load_runtime();from ytcore import vp_preview;raise SystemExit(vp_preview.run(globals()))
     elif cmd=='pvpart':
-        load_runtime();import vp_preview;vp_preview.worker(globals(),sys.argv[3])
+        load_runtime();from ytcore import vp_preview;vp_preview.worker(globals(),sys.argv[3])
     elif cmd=='check':
-        import vp_check;raise SystemExit(vp_check.run(globals()))
+        from ytcore import vp_check;raise SystemExit(vp_check.run(globals()))
     elif cmd=='sents':
         for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
             print(f"--- {s['id']} {s['key']}")

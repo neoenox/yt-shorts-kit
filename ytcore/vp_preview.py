@@ -49,7 +49,7 @@ def run(V, k=3):
             continue
         jf = d / f'job_{i}.json'
         jf.write_text(json.dumps(g), encoding='utf8')
-        procs.append(subprocess.Popen([sys.executable, str(Path(V['__file__']).resolve()), slug, 'pvpart', str(jf)], cwd=str(V['ROOT']), env={**__import__('os').environ, 'PYTHONIOENCODING': 'utf8'}))
+        procs.append(subprocess.Popen([sys.executable, '-m', 'ytcore.vp', slug, 'pvpart', str(jf)], cwd=str(V['ROOT']), env={**__import__('os').environ, 'PYTHONIOENCODING': 'utf8'}))
     rc = [p.wait() for p in procs]
     if any(rc):
         raise SystemExit(f'preview の描画に失敗（{rc}）。上のエラーを見る')

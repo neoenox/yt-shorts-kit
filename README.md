@@ -20,11 +20,14 @@
 | `ytcore.first_frame_preview` | Short の冒頭を縮小して並べる(全編レンダの前の確認) |
 | `ytcore.hn_text` / `ytcore.thin_commas` / `ytcore.rich_text` | 日本語の数字表記・読点の整理・強調語の描画 |
 | `ytcore.vp_lock` | 長尺ビルドの二重起動防止 |
+| `ytcore.vp` / `ytcore.vp_check` / `ytcore.vp_preview` / `ytcore.script_lint` | 長尺(解説動画)のパイプライン。story→kana→audio→bgm→build→qa→desc→thumb と、描画前の検査・場面の一覧・台本の検査。`python scripts/vp.py <slug> <コマンド>` |
 
 **使い方**: プロジェクトの `scripts/<名前>.py` を薄い入口(shim)にする。shim が `YT_PROJECT_ROOT` を設定して `ytcore.<名前>` を呼ぶので、`import make_short` も `python scripts/make_short2.py` も従来どおり動く。
 チャンネル固有の値は、プロジェクト直下の `channel.toml`(`ytkit.project` が読む)に置く。
 
-**まだ移していないもの**: 長尺 `vp.py`。プロジェクト側の `vp_anim*.py`(約1,700行)を `bind(globals())` で結び、部品の描画をサブプロセスで自分の `__file__` から実行し、描画コードの指紋をファイルのパスで取るため、移すには作りの見直しが要る。
+**プロジェクトに求める約束事(vp)**: ①`channel.toml` の `[project] plugin_dir`(既定 `scripts`)に、プラグイン(動画ごとの動く図 `vp_anim*.py`、`make_upload_pack.py`、`ffmpeg_skill_check.py`)を置く。コアはこの場所を `sys.path` に足して import する。②`data/<slug>_spec.json`・`data/<slug>_*.json`・`out/`・`cache/`・`docs/themes/<theme>/09_script_v2.md`・`assets/` の配置。③部品は `python -m ytcore.vp` のサブプロセスで動く(自分のファイルのパスには頼らない)。描画コードの指紋は、`vp.py` 本体・`plugin_dir` の `vp_anim*.py`・text helpers の中身を、行末を除いて名前順に読む。
+
+**まだ移していないもの**: プロジェクト固有の部品(`vp_anim*.py` など)・手順書と確認の仕組み・`yt_api.py`。
 
 ## 入れ方（手元の Windows。編集すると全リポジトリに反映される）
 
