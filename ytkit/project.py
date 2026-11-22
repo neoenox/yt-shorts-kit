@@ -20,12 +20,26 @@ class ConfigError(RuntimeError):
     pass
 
 
+def _find_up(start):
+    """start から親へたどって、channel.toml があるフォルダーを探す。無ければ None。"""
+    start = Path(start).resolve()
+    for d in (start, *start.parents):
+        if (d / CONFIG_NAME).exists():
+            return d
+    return None
+
+
 def project_root(script_file, levels=1):
-    """プロジェクトのルート。環境変数 YT_PROJECT_ROOT が優先、無ければ script_file の levels 個上(既定は scripts/ の1つ上)。"""
+    """プロジェクトのルート。順序: 環境変数 YT_PROJECT_ROOT → script_file の levels 個上に channel.toml があればそこ →
+    カレントから親へたどって channel.toml を探す → script_file の levels 個上(従来の既定。scripts/ の1つ上)。
+    共有パッケージ(ytcore)の中から呼ぶと script_file はプロジェクトの外なので、プロジェクト側の入口が YT_PROJECT_ROOT を設定する。"""
     env = os.environ.get(ENV_ROOT)
     if env:
         return Path(env)
-    return Path(script_file).resolve().parents[levels]
+    near = Path(script_file).resolve().parents[levels]
+    if (near / CONFIG_NAME).exists():
+        return near
+    return _find_up(Path.cwd()) or near
 
 
 @functools.lru_cache(maxsize=None)

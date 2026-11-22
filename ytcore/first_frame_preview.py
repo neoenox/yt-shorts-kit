@@ -11,9 +11,8 @@ import sys
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import make_short2 as M2
-from make_short import ROOT
+from ytcore import make_short2 as M2
+from ytcore.make_short import ROOT
 
 PHONE = (360, 640)
 CPS_EST = 0.18   # 秒/文字

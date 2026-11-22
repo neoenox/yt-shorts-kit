@@ -11,6 +11,27 @@ def test_project_root_default_is_parent_of_scripts_dir(tmp_path, monkeypatch):
     assert project.project_root(script) == tmp_path
 
 
+def test_project_root_falls_back_to_a_channel_toml_found_from_cwd(tmp_path, monkeypatch):
+    monkeypatch.delenv(project.ENV_ROOT, raising=False)
+    (tmp_path / 'channel.toml').write_text('', encoding='utf-8')
+    deep = tmp_path / 'a' / 'b'
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+    elsewhere = tmp_path.parent / 'pkg' / 'site' / 'mod.py'   # 共有パッケージの中(プロジェクトの外)から呼ばれた想定
+    assert project.project_root(elsewhere) == tmp_path
+
+
+def test_project_root_prefers_script_side_channel_toml(tmp_path, monkeypatch):
+    monkeypatch.delenv(project.ENV_ROOT, raising=False)
+    (tmp_path / 'scripts').mkdir()
+    (tmp_path / 'channel.toml').write_text('', encoding='utf-8')
+    other = tmp_path / 'other'
+    other.mkdir()
+    (other / 'channel.toml').write_text('', encoding='utf-8')
+    monkeypatch.chdir(other)
+    assert project.project_root(tmp_path / 'scripts' / 'x.py') == tmp_path
+
+
 def test_project_root_env_overrides(tmp_path, monkeypatch):
     monkeypatch.setenv(project.ENV_ROOT, str(tmp_path / 'other'))
     assert project.project_root(tmp_path / 'scripts' / 'x.py') == tmp_path / 'other'

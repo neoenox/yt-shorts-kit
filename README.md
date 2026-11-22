@@ -11,6 +11,21 @@
 | `ytkit.freevideo` | ComfyUI(FreeVideo)の HTTP API | rakuten-shorts-affiliate |
 | `ytkit.project` | `project_root`(環境変数 `YT_PROJECT_ROOT` 優先)・`load_config`(`channel.toml`)・`require`(足りないキーを名指しして止める) | rekishikaisetu(`make_short.py`・`make_short2.py`) |
 
+## ytcore（動画制作のコア。2026-11-22 に取り込み）
+`ytkit` が土台の部品なのに対し、`ytcore` は動画の描画そのもの。履歴は `git filter-repo` で保って取り込んだ(`git log -- ytcore/make_short2.py` で元の履歴が辿れる)。
+
+| モジュール | 中身 |
+|---|---|
+| `ytcore.make_short` / `ytcore.make_short2` | 縦型 Short の描画(終了カード・字幕・概要欄・BGMミックス)。`python scripts/make_short2.py <slug>` |
+| `ytcore.first_frame_preview` | Short の冒頭を縮小して並べる(全編レンダの前の確認) |
+| `ytcore.hn_text` / `ytcore.thin_commas` / `ytcore.rich_text` | 日本語の数字表記・読点の整理・強調語の描画 |
+| `ytcore.vp_lock` | 長尺ビルドの二重起動防止 |
+
+**使い方**: プロジェクトの `scripts/<名前>.py` を薄い入口(shim)にする。shim が `YT_PROJECT_ROOT` を設定して `ytcore.<名前>` を呼ぶので、`import make_short` も `python scripts/make_short2.py` も従来どおり動く。
+チャンネル固有の値は、プロジェクト直下の `channel.toml`(`ytkit.project` が読む)に置く。
+
+**まだ移していないもの**: 長尺 `vp.py`。プロジェクト側の `vp_anim*.py`(約1,700行)を `bind(globals())` で結び、部品の描画をサブプロセスで自分の `__file__` から実行し、描画コードの指紋をファイルのパスで取るため、移すには作りの見直しが要る。
+
 ## 入れ方（手元の Windows。編集すると全リポジトリに反映される）
 
 ```powershell

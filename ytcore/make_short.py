@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from ytkit.project import project_root, load_config, require   # 共通部品（E:\yt-shorts-kit）
 
-ROOT = project_root(__file__)   # 環境変数 YT_PROJECT_ROOT があればそちら。無ければ scripts/ の1つ上
+ROOT = project_root(__file__)   # 環境変数 YT_PROJECT_ROOT(プロジェクト側の入口 scripts/*.py が設定する)、無ければ cwd から上へ channel.toml を探す
 CFG = load_config(ROOT)         # チャンネル設定 ROOT/channel.toml（名前・ナレーター・BGM・フォント）
 
 
@@ -232,8 +232,7 @@ def synth(spec, work):
 
 
 def display(t):
-    sys.path.insert(0, str(ROOT / 'scripts'))
-    from hn_text import display as dsp
+    from ytcore.hn_text import display as dsp
     return dsp(t)
 
 

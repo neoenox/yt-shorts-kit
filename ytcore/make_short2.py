@@ -5,11 +5,10 @@ spec: title, long_id, long_title, pron(JSON), hook, notes, art, scenes[{text,big
 import json, subprocess, sys
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import make_short as M
-from make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix
-from make_short import CH, VOICE, BGM, TAGS   # チャンネル設定（ROOT/channel.toml）。呼び出し時に引くので、書き換えると反映される
-import rich_text as rich
+from ytcore import make_short as M
+from ytcore.make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix
+from ytcore.make_short import CH, VOICE, BGM, TAGS   # チャンネル設定（ROOT/channel.toml）。呼び出し時に引くので、書き換えると反映される
+from ytcore import rich_text as rich
 
 COLS = M.COL
 _BG = {}
