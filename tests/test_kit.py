@@ -174,12 +174,15 @@ def test_freevideo_quality_profiles():
             balanced['upscale_factor']) == (True, 8, 3, '2')
 
     fast = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast')['1']['inputs']
-    assert (fast['two_pass'], fast['base_steps'], fast['upscale_factor']) == (False, 6, '1')
+    assert (fast['two_pass'], fast['base_steps']) == (False, 6)
     assert 'refine_steps' not in fast
+    # upscale_factor は two_pass 専用（options は '2'/'1.5'/'1.2'）。一パスでは渡さない。
+    assert 'upscale_factor' not in fast
 
     fastest = freevideo.graph('a', 544, 960, 5, seed=1, quality='fastest')['1']['inputs']
     assert fastest['base_steps'] == 4
     assert 'refine_steps' not in fastest
+    assert 'upscale_factor' not in fastest
 
     custom = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast', base_steps=3)
     assert custom['1']['inputs']['base_steps'] == 3
