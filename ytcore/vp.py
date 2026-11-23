@@ -190,33 +190,66 @@ def ease(x):
 
 def line_text(d, xy, text, font, fill=WHITE, a=1.0):
     d.text(xy, text, font=font, fill=tuple(fill[:3]) + (int(255 * a),))
-def box_fill(d,box,a,col=EDGE,w=2,fill=BG):
-    d.rounded_rectangle(box,12,fill=tuple(fill[:3])+(int(fill[3]*a) if len(fill)>3 else int(255*a),),outline=tuple(col[:3])+(int(255*a),),width=w)
-def text_block(d,x,y,text,size,maxw,col=WHITE,a=1.0,fam='sans',lh=1.3):
-    f=(F if fam=='sans' else FB)[size];ls=wrapn(d,text,f,maxw)
-    for l in ls:line_text(d,(x,y),l,f,col,a);y+=int(size*lh)
+def box_fill(d, box, a, col=EDGE, w=2, fill=BG):
+    d.rounded_rectangle(box, 12,
+                        fill=tuple(fill[:3]) + (int(fill[3] * a) if len(fill) > 3 else int(255 * a),),
+                        outline=tuple(col[:3]) + (int(255 * a),), width=w)
+
+
+def text_block(d, x, y, text, size, maxw, col=WHITE, a=1.0, fam='sans', lh=1.3):
+    f = (F if fam == 'sans' else FB)[size]
+    for ln in wrapn(d, text, f, maxw):
+        line_text(d, (x, y), ln, f, col, a)
+        y += int(size * lh)
     return y
-def measure(d,text,size,maxw,fam='sans',lh=1.3):
-    f=(F if fam=='sans' else FB)[size];return len(wrapn(d,text,f,maxw))*int(size*lh)
+
+
+def measure(d, text, size, maxw, fam='sans', lh=1.3):
+    f = (F if fam == 'sans' else FB)[size]
+    return len(wrapn(d, text, f, maxw)) * int(size * lh)
+
+
 class Ctx:
-    def __init__(s,ci,t):
-        s.ci=ci;s.t=t;s.key=KEYS[ci];s.segl=[x for x in SEGS if x['scene']==ci];s.st=[x['start'] for x in s.segl]
-    def on(s,i):return i is None or (i<len(s.st) and s.t>=s.st[i])
-    def a(s,i,dur=.5):
-        if i is None:return 1.0
-        return 0.0 if not s.on(i) else min(1,(s.t-s.st[i])/dur)
-    def idx(s):return sum(1 for x in s.st if s.t>=x)-1
-    def vis(s,it):
-        at=it.get('at');un=it.get('until')
+    """現在の章・時刻から、部品の表示状態と出現アニメーションを計算する。"""
+
+    def __init__(s, ci, t):
+        s.ci = ci
+        s.t = t
+        s.key = KEYS[ci]
+        s.segl = [x for x in SEGS if x['scene'] == ci]
+        s.st = [x['start'] for x in s.segl]
+
+    def on(s, i):
+        return i is None or (i < len(s.st) and s.t >= s.st[i])
+
+    def a(s, i, dur=.5):
+        if i is None:
+            return 1.0
+        return 0.0 if not s.on(i) else min(1, (s.t - s.st[i]) / dur)
+
+    def idx(s):
+        return sum(1 for x in s.st if s.t >= x) - 1
+
+    def vis(s, it):
+        at, un = it.get('at'), it.get('until')
         return s.on(at) and not (un is not None and s.on(un))
+
+
 # ---------------------------------------------------------------- images
-_IMG={}
-def get_img(name,w,h):
-    k=(name,w,h)
+_IMG = {}
+
+
+def get_img(name, w, h):
+    k = (name, w, h)
     if k not in _IMG:
-        meta=SPEC['images'][name];im=Image.open(P(meta['file'])).convert('RGB');c=meta.get('crop')
-        if c:im=im.crop((int(im.width*c[0]),int(im.height*c[1]),int(im.width*c[2]),int(im.height*c[3])))
-        s=min(w/im.width,h/im.height);_IMG[k]=im.resize((max(1,int(im.width*s)),max(1,int(im.height*s))),Image.LANCZOS)
+        meta = SPEC['images'][name]
+        im = Image.open(P(meta['file'])).convert('RGB')
+        c = meta.get('crop')
+        if c:
+            im = im.crop((int(im.width * c[0]), int(im.height * c[1]),
+                          int(im.width * c[2]), int(im.height * c[3])))
+        s = min(w / im.width, h / im.height)
+        _IMG[k] = im.resize((max(1, int(im.width * s)), max(1, int(im.height * s))), Image.LANCZOS)
     return _IMG[k]
 def it_image(im,d,cx,it):
     a=cx.a(it.get('at'))
@@ -349,47 +382,91 @@ def it_flow(im,d,cx,it):
             ls=wrapn(d,e['text'],F[size],w-30);yy=y+(h-len(ls)*int(size*1.25))/2
             for l in ls:line_text(d,(xx+(w-tw(d,l,F[size]))/2,yy),l,F[size],WHITE,a);yy+=int(size*1.25)
             if k<n-1:d.polygon([(xx+w+12,y+h/2-14),(xx+w+gap-12,y+h/2),(xx+w+12,y+h/2+14)],fill=GOLD+(int(255*a),))
-def it_daybar(im,d,cx,it):
+def it_daybar(im, d, cx, it):
     """1-day bar (0-24h): day part (mk..bk minutes) split into 6, night part split into 6. rows: [{label,mk,bk,at}]"""
-    x0=it.get('x0',150);x1=it.get('x1',1770);y=it.get('y',230);rh=it.get('rh',190);bh=it.get('bh',64)
-    X=lambda m:x0+(x1-x0)*m/1440
+    x0 = it.get('x0', 150)
+    x1 = it.get('x1', 1770)
+    y = it.get('y', 230)
+    rh = it.get('rh', 190)
+    bh = it.get('bh', 64)
+    X = lambda m: x0 + (x1 - x0) * m / 1440
     if any(cx.vis(r) for r in it['rows']):
-        for h in range(0,25,3):
-            xx=X(h*60);d.line([(xx,y-52),(xx,y+max(k for k,r in enumerate(it['rows']) if cx.vis(r))*rh+bh)],fill=(70,90,110,255),width=1);tl=f'{h}時';line_text(d,(xx-tw(d,tl,F[26])/2,y-88),tl,F[26],DIM,1.0)
-    for k,r in enumerate(it['rows']):
-        if not cx.vis(r):continue
-        a=cx.a(r.get('at'));yy=y+k*rh;mk,bk=r['mk'],r['bk'];dk=(bk-mk)/6;nk=(1440-(bk-mk))/6
-        line_text(d,(x0,yy-44),r['label'],F[34],WHITE,a)
-        d.rectangle((X(0),yy,X(1440),yy+bh),fill=(26,54,92,int(255*a)))
-        d.rectangle((X(mk),yy,X(bk),yy+bh),fill=(206,164,78,int(235*a)))
+        for h in range(0, 25, 3):
+            xx = X(h * 60)
+            bottom = y + max(k for k, r in enumerate(it['rows']) if cx.vis(r)) * rh + bh
+            d.line([(xx, y - 52), (xx, bottom)], fill=(70, 90, 110, 255), width=1)
+            tl = f'{h}時'
+            line_text(d, (xx - tw(d, tl, F[26]) / 2, y - 88), tl, F[26], DIM, 1.0)
+    for k, r in enumerate(it['rows']):
+        if not cx.vis(r):
+            continue
+        a = cx.a(r.get('at'))
+        yy = y + k * rh
+        mk, bk = r['mk'], r['bk']
+        dk = (bk - mk) / 6
+        nk = (1440 - (bk - mk)) / 6
+        line_text(d, (x0, yy - 44), r['label'], F[34], WHITE, a)
+        d.rectangle((X(0), yy, X(1440), yy + bh), fill=(26, 54, 92, int(255 * a)))
+        d.rectangle((X(mk), yy, X(bk), yy + bh), fill=(206, 164, 78, int(235 * a)))
         for q in range(7):
-            xx=X(mk+q*dk);d.line([(xx,yy),(xx,yy+bh)],fill=(30,24,10,int(255*a)),width=2)
+            xx = X(mk + q * dk)
+            d.line([(xx, yy), (xx, yy + bh)], fill=(30, 24, 10, int(255 * a)), width=2)
         for q in range(7):
-            m=(bk+q*nk)%1440;xx=X(m);d.line([(xx,yy),(xx,yy+bh)],fill=(150,185,235,int(255*a)),width=2)
-        dtxt=r.get('dlabel',f'昼の一刻 {int(dk//60)}時間{int(dk%60+0.5)}分');ntxt=r.get('nlabel',f'夜の一刻 {int(nk//60)}時間{int(nk%60+0.5)}分')
-        if cx.on(r.get('dat')):line_text(d,(X(mk)+(X(bk)-X(mk))/2-tw(d,dtxt,F[32])/2,yy+bh+10),dtxt,F[32],GOLD,cx.a(r.get('dat')))
+            m = (bk + q * nk) % 1440
+            xx = X(m)
+            d.line([(xx, yy), (xx, yy + bh)], fill=(150, 185, 235, int(255 * a)), width=2)
+        dtxt = r.get('dlabel', f'昼の一刻 {int(dk // 60)}時間{int(dk % 60 + 0.5)}分')
+        ntxt = r.get('nlabel', f'夜の一刻 {int(nk // 60)}時間{int(nk % 60 + 0.5)}分')
+        if cx.on(r.get('dat')):
+            x = X(mk) + (X(bk) - X(mk)) / 2 - tw(d, dtxt, F[32]) / 2
+            line_text(d, (x, yy + bh + 10), dtxt, F[32], GOLD, cx.a(r.get('dat')))
         if cx.on(r.get('nat')):
-            nx=X(bk)+(X(1440)-X(bk))/2;w_=tw(d,ntxt,F[32]);line_text(d,(max(X(bk)+6,min(nx-w_/2,x1-w_)),yy+bh+10),ntxt,F[32],BLUE,cx.a(r.get('nat')))
-def it_line(im,d,cx,it):
+            nx = X(bk) + (X(1440) - X(bk)) / 2
+            w_ = tw(d, ntxt, F[32])
+            x = max(X(bk) + 6, min(nx - w_ / 2, x1 - w_))
+            line_text(d, (x, yy + bh + 10), ntxt, F[32], BLUE, cx.a(r.get('nat')))
+def it_line(im, d, cx, it):
     """line chart: x labels, one series; points appear one by one by sentence index. series=[{label,value,at}], y range ymin..ymax, unit"""
-    x0,y0,x1,y1=it['box'];ser=it['series'];ymin=it.get('ymin',0);ymax=it.get('ymax',30);unit=it.get('unit','％');title=it.get('title')
-    if not any(cx.vis(s) for s in ser):return
-    box_fill(d,(x0,y0,x1,y1),1.0);yy=y0+10
-    if title:line_text(d,(x0+22,yy),title,FB[32],GOLD,1.0);yy+=48
-    px0,px1,py0,py1=x0+150,x1-90,yy+50,y1-70
-    for g in range(0,int(ymax)+1,10):
-        gy=py1-(py1-py0)*(g-ymin)/(ymax-ymin);d.line([(px0,gy),(px1,gy)],fill=(60,80,100,255),width=1);line_text(d,(x0+20,gy-16),f'{g}{unit}',F[26],DIM,1.0)
-    n=len(ser);pts=[]
-    for k,s in enumerate(ser):
-        y0_,y1_=ser[0].get('year',0),ser[-1].get('year',n-1);yr=s.get('year',k);X=px0+(px1-px0)*(yr-y0_)/max(1,(y1_-y0_));Y=py1-(py1-py0)*(s['value']-ymin)/(ymax-ymin);pts.append((X,Y))
-        line_text(d,(X-tw(d,s['label'],F[26])/2,py1+12),s['label'],F[26],DIM,1.0)
-    for k,s in enumerate(ser):
-        if not cx.vis(s):continue
-        a=cx.a(s.get('at'));X,Y=pts[k];col=COL.get(s.get('col','org'),ORG)
-        if k>0 and cx.vis(ser[k-1]):d.line([pts[k-1],(X,Y)],fill=tuple(col)+(int(255*a),),width=5)
-        d.ellipse((X-9,Y-9,X+9,Y+9),fill=tuple(col)+(int(255*a),),outline=WHITE+(int(255*a),),width=2)
-        if s.get('show',True):
-            v=s.get('vlabel',f"{s['value']}{unit}");line_text(d,(X-tw(d,v,F[30])/2,Y-48),v,F[30],WHITE,a)
+    x0, y0, x1, y1 = it['box']
+    ser = it['series']
+    ymin = it.get('ymin', 0)
+    ymax = it.get('ymax', 30)
+    unit = it.get('unit', '％')
+    title = it.get('title')
+    if not any(cx.vis(s) for s in ser):
+        return
+    box_fill(d, (x0, y0, x1, y1), 1.0)
+    yy = y0 + 10
+    if title:
+        line_text(d, (x0 + 22, yy), title, FB[32], GOLD, 1.0)
+        yy += 48
+    px0, px1, py0, py1 = x0 + 150, x1 - 90, yy + 50, y1 - 70
+    for g in range(0, int(ymax) + 1, 10):
+        gy = py1 - (py1 - py0) * (g - ymin) / (ymax - ymin)
+        d.line([(px0, gy), (px1, gy)], fill=(60, 80, 100, 255), width=1)
+        line_text(d, (x0 + 20, gy - 16), f'{g}{unit}', F[26], DIM, 1.0)
+    n = len(ser)
+    pts = []
+    for k, s in enumerate(ser):
+        y0_, y1_ = ser[0].get('year', 0), ser[-1].get('year', n - 1)
+        yr = s.get('year', k)
+        X = px0 + (px1 - px0) * (yr - y0_) / max(1, (y1_ - y0_))
+        Y = py1 - (py1 - py0) * (s['value'] - ymin) / (ymax - ymin)
+        pts.append((X, Y))
+        line_text(d, (X - tw(d, s['label'], F[26]) / 2, py1 + 12), s['label'], F[26], DIM, 1.0)
+    for k, s in enumerate(ser):
+        if not cx.vis(s):
+            continue
+        a = cx.a(s.get('at'))
+        X, Y = pts[k]
+        col = COL.get(s.get('col', 'org'), ORG)
+        if k > 0 and cx.vis(ser[k - 1]):
+            d.line([pts[k - 1], (X, Y)], fill=tuple(col) + (int(255 * a),), width=5)
+        d.ellipse((X - 9, Y - 9, X + 9, Y + 9), fill=tuple(col) + (int(255 * a),),
+                  outline=WHITE + (int(255 * a),), width=2)
+        if s.get('show', True):
+            v = s.get('vlabel', f"{s['value']}{unit}")
+            line_text(d, (X - tw(d, v, F[30]) / 2, Y - 48), v, F[30], WHITE, a)
 def it_swirl(im,d,cx,it):
     """concept sketch of a swirl seen from above: dir 'ccw'|'cw' (as seen on screen), centre (x,y), radius r, label under it"""
     if not cx.vis(it):return
