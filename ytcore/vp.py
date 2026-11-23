@@ -7,11 +7,12 @@ Scene item types (all optional 'at' = sentence index at which the item appears, 
   stack, panel, image, timeline, chips, bars, table, cols2, big, flow
 """
 from pathlib import Path
-import json,subprocess,sys,math,os,re,hashlib,time,wave,shutil
+import json,subprocess,sys,math,os,re,hashlib,wave
 import numpy as np
 from ytcore import hn_text,thin_commas,rich_text as rich
 from ytcore.hn_text import display
 from ytcore.thin_commas import thin
+from ytcore.subtitles import write_srt
 from PIL import Image,ImageDraw,ImageFont
 from ytkit.project import project_root,load_config,section,require   # 共通部品
 from ytkit import voicevox as vv,loudness as yloud,qa as yqa
@@ -559,7 +560,6 @@ def stage_audio():
         sd=math.ceil((t+scene_hold)*30)/30;j=np.concatenate(local);j=np.pad(j,(0,round(sd*rate)-len(j)));allpcm.append(j)
         timeline.append({**sc,'start':cursor,'duration':sd,'end':cursor+sd});cursor+=sd
     writewav(P(f'out/{SLUG}_narration.wav'),np.concatenate(allpcm),rate)
-    st=lambda t:(lambda ms:f'{ms//3600000:02}:{ms//60000%60:02}:{ms//1000%60:02},{ms%1000:03}')(round(t*1000))
     cues=[];rep=[]
     for x in segs:
         ch=split_clauses(thin(display(x['text'])));tot=sum(len(c) for c in ch);cum=0;fr=[]
@@ -568,7 +568,7 @@ def stage_audio():
         ct=x.get('cue_times');ts=ct if ct and len(ct)==len(ch)+1 else snap_bounds(x,fr)
         rep.append(dict(start=x['start'],end=x['end'],n=len(ch),snapped=sum(1 for a,b in zip(nom,ts) if abs(a-b)>1e-6),max_shift=round(max([abs(a-b) for a,b in zip(nom,ts)]),4),pauses=len(x.get('pauses') or [])))
         for i,c in enumerate(ch):cues.append((ts[i],ts[i+1],c))
-    P(f'out/{SLUG}_subtitles.srt').write_text('\n\n'.join(f'{i+1}\n{st(a)} --> {st(b)}\n{c}' for i,(a,b,c) in enumerate(cues))+'\n',encoding='utf8')
+    write_srt(P(f'out/{SLUG}_subtitles.srt'),cues)
     P(f'out/{SLUG}_subtitle_timing.json').write_text(json.dumps(dict(tol=SNAP_TOL,min_cue=MIN_CUE,max_shift=max([r['max_shift'] for r in rep] or [0]),snapped=sum(r['snapped'] for r in rep),segments=rep),ensure_ascii=False,indent=1),encoding='utf8')
     P(f'data/{SLUG}_timeline.json').write_text(json.dumps(timeline,ensure_ascii=False,indent=1),encoding='utf8')
     P(f'out/{SLUG}_audio_report.json').write_text(json.dumps(dict(engine=requests.get(BASE+'/version').json(),speaker=VOICE['label'],style=style,voice_tuning=dict(speed=speed,pre_phoneme=pre,post_phoneme=post,scene_hold=scene_hold),segments=segs,total_seconds=cursor,all_lines_voiced=True,semantic_asr_verified=False),ensure_ascii=False,indent=1),encoding='utf8')

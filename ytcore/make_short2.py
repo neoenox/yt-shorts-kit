@@ -3,13 +3,13 @@ usage: python scripts/make_short2.py <slug>     # data/short_<slug>.json から 
 spec: title, long_id, long_title, pron(JSON), hook, notes, art, scenes[{text,big,sub,src,art,col}]。最後の場面は end:true（本動画のタイトルと誘導を出す）。
 ナレーションの数字・限定は長尺の台本（docs/themes/*/09_script_v2.md）と一致させる。VOICEVOX は VOICEVOX_URL、ffmpeg は FFMPEG / PATH から探す。"""
 import json, subprocess, sys
-from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance
 from ytcore import make_short as M
-from ytcore.make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix
+from ytcore.make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix, encode_frames
 from ytcore.make_short import CH, VOICE, BGM, TAGS   # チャンネル設定（ROOT/channel.toml）。呼び出し時に引くので、書き換えると反映される
 from ytcore import rich_text as rich
 from ytkit.ffmpeg_tools import find_ffmpeg, find_ffprobe
+from ytcore.subtitles import write_srt
 
 COLS = M.COL
 _BG = {}
@@ -325,20 +325,14 @@ def frame_at(spec, segs, cks, t, preview=False):
 def render(spec, segs, total, out_mp4, slug):
     n = round(total * FPS)
     cks = subtitle_chunks(segs)
-    st = lambda t: (lambda ms: f'{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}')(round(t * 1000))
-    (ROOT / 'out' / f'short_{slug}_subtitles.srt').write_text('\n\n'.join(f'{i + 1}\n{st(a)} --> {st(b)}\n{c}' for i, (a, b, c) in enumerate(cks)) + '\n', encoding='utf8')
-    proc = subprocess.Popen([find_ffmpeg(), '-y', '-v', 'warning', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', 'pipe:0',
-                             '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', str(out_mp4)], stdin=subprocess.PIPE)
-    try:
+    write_srt(ROOT / 'out' / f'short_{slug}_subtitles.srt', cks)
+    def frames():
         for fi in range(n):
-            im = frame_at(spec, segs, cks, fi / FPS)
-            proc.stdin.write(im.convert('RGB').tobytes())
+            yield frame_at(spec, segs, cks, fi / FPS).convert('RGB').tobytes()
+    try:
+        encode_frames(out_mp4, frames(), preset='veryfast')
     finally:
         _close_videos()
-        proc.stdin.close()
-    rc = proc.wait()
-    if rc:
-        raise subprocess.CalledProcessError(rc, 'ffmpeg', f'Short {slug} の映像エンコードに失敗')
 
 
 def description(spec):

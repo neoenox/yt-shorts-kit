@@ -17,6 +17,7 @@
 | モジュール | 中身 |
 |---|---|
 | `ytcore.make_short` / `ytcore.make_short2` | 縦型 Short の描画(終了カード・字幕・概要欄・BGMミックス)。`python scripts/make_short2.py <slug>` |
+| `ytcore.subtitles` | SRT の時刻変換と書き出し(Short・長尺で共有) |
 | `ytcore.first_frame_preview` | Short の冒頭を縮小して並べる(全編レンダの前の確認) |
 | `ytcore.hn_text` / `ytcore.thin_commas` / `ytcore.rich_text` | 日本語の数字表記・読点の整理・強調語の描画 |
 | `ytcore.vp_lock` | 長尺ビルドの二重起動防止 |

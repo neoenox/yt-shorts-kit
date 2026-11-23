@@ -8,7 +8,6 @@ spec: data/short_<slug>.json（make_short2 と同じ）。背景(art、または
 import json
 import subprocess
 import sys
-from pathlib import Path
 from PIL import Image, ImageDraw
 
 from ytcore import make_short2 as M2

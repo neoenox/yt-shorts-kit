@@ -9,11 +9,14 @@ import sys
 
 import pytest
 
-from ytcore import hn_text, rich_text, thin_commas, vp_lock
+from ytcore import hn_text, rich_text, subtitles, thin_commas, vp_lock
 
 
 CHANNEL_TOML = '''[channel]
 about = "テスト"
+name = "ch"
+tagline = "tag"
+tagline_tiktok = "tt"
 terms_check = "確認"
 [voice]
 speaker = "テスト話者"
@@ -21,10 +24,16 @@ style = "ノーマル"
 speed = 1.0
 label = "テスト話者"
 credit_long = "音声: テスト"
+credit = "音声: テスト"
 [bgm]
 dir = "assets/bgm"
 pattern = "bgm_{name}.mp3"
 credit_long = "BGM: {tracks}"
+file = "music/a.wav"
+credit = "BGM"
+[hashtags]
+shorts = "#s"
+tiktok = "#t"
 [bgm.names]
 [fonts]
 dir = "fonts/"
@@ -46,7 +55,8 @@ def vp(monkeypatch, tmp_path):
     try:
         yield module
     finally:
-        sys.modules.pop('ytcore.vp', None)
+        for name in ('ytcore.vp', 'ytcore.make_short', 'ytcore.make_short2'):
+            sys.modules.pop(name, None)
         sys.path[:] = old_path
 
 
@@ -118,3 +128,52 @@ def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
 def test_lock_alive_detects_current_process():
     assert vp_lock.alive(os.getpid())
     assert not vp_lock.alive(-1)
+
+
+# ---- 字幕書き出し・映像エンコードの共有部品
+
+def test_srt_time_and_write_srt(tmp_path):
+    assert subtitles.srt_time(0) == '00:00:00,000'
+    assert subtitles.srt_time(61.5) == '00:01:01,500'
+    assert subtitles.srt_time(3661.25) == '01:01:01,250'
+    out = tmp_path / 'test.srt'
+    subtitles.write_srt(out, [(0, 1.5, '一行目'), (60, 61.5, '二行目')])
+    assert out.read_text(encoding='utf8') == (
+        '1\n00:00:00,000 --> 00:00:01,500\n一行目\n\n'
+        '2\n00:01:00,000 --> 00:01:01,500\n二行目\n')
+
+
+def test_encode_frames_writes_frames_and_reports_failure(vp, monkeypatch, tmp_path):
+    ms = importlib.import_module('ytcore.make_short')
+    rc = [0]
+    made = []
+
+    class FakeProc:
+        def __init__(self, cmd, **kwargs):
+            self.cmd = cmd
+            self.stdin = self
+            self.written = []
+            self.closed = False
+            made.append(self)
+
+        def write(self, data):
+            self.written.append(data)
+
+        def close(self):
+            self.closed = True
+
+        def wait(self):
+            return rc[0]
+
+    monkeypatch.setattr(ms.subprocess, 'Popen', FakeProc)
+    monkeypatch.setattr(ms, 'find_ffmpeg', lambda: '/tools/ffmpeg')
+
+    ms.encode_frames(tmp_path / 'a.mp4', [b'ab', b'cd'], preset='veryfast')
+    assert made[0].cmd[0] == '/tools/ffmpeg'
+    assert made[0].cmd[made[0].cmd.index('-preset') + 1] == 'veryfast'
+    assert made[0].written == [b'ab', b'cd']
+    assert made[0].closed
+
+    rc[0] = 1
+    with pytest.raises(ms.subprocess.CalledProcessError):
+        ms.encode_frames(tmp_path / 'a.mp4', [b'ab'])

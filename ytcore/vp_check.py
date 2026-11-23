@@ -12,7 +12,6 @@ spec と台本（story のあと）だけを調べ、数秒で次を見つける
 終了コード：誤り（ERR）があれば 1。注意（WARN）だけなら 0。"""
 import json
 import sys
-from pathlib import Path
 
 
 def run(V, quiet=False):
