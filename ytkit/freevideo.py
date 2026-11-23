@@ -53,6 +53,7 @@ def graph(text, width, height, seconds, seed=None, quality='balanced', **overrid
     同じプロンプト/seed/544x960/5秒で実測したサンプリング時間:
       balanced(refine=3) 207.4s / refine=2 192.9s (-7%) / refine=1 186.8s (-10%)。
     画質は refine=3 と 1 でほぼ差が無かったため、balanced は refine=1 を採用。
+    運用では balanced のみを使用。fast / fastest は一パスの実験用として残している。
     two_pass を切ると base_steps だけの一パス生成になる（ノード側の仕様）。
     overrides で base_steps など個別の値を上書きできる（例: base_steps=5）。
     """

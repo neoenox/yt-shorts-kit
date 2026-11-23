@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 # 2026-11-23 時点の Windows 環境（NotoSansJP-VF.ttf / NotoSerifJP-VF.ttf）で
 # 現在の ytcore.vp を描画した値。描画順・座標・色を変えると壊れる。
@@ -144,6 +144,51 @@ def test_render_frames_are_structurally_stable(golden_vp):
     # 背景だけではなく、何かが描かれている（単色でない）
     raw = first.tobytes()
     assert len({raw[i:i + 3] for i in range(0, len(raw), 3)}) > 100
+
+
+def test_chapter_crossfade_blends_neighbouring_chapters(golden_vp, monkeypatch):
+    """章の切れ目では前後の章が混ざり、どちらとも同じ絵にならない。"""
+    vp, _ = golden_vp
+    ch1 = {'key': 'ch1', 'id': 0, 'start': 0.0, 'duration': 6.0, 'end': 6.0}
+    ch2 = {'key': 'ch2', 'id': 1, 'start': 6.0, 'duration': 6.0, 'end': 12.0}
+    seg2 = {'scene': 1, 'text': '第二章の長いナレーションです。',
+            'start': 6.2, 'end': 9.0, 'pauses': [], 'cue_times': [6.2, 9.0]}
+    monkeypatch.setattr(vp.STATE, 'tl', [ch1, ch2])
+    monkeypatch.setattr(vp.STATE, 'segs', SEGS + [seg2])
+    ch2_spec = {'key': 'ch2', 'title': '第二章', 'chapter_title': '第二章', 'scene': SCENE}
+    vp.STATE.spec['chapters'].append(ch2_spec)
+    monkeypatch.setattr(vp.STATE, 'keys', ['ch1', 'ch2'])
+    monkeypatch.setattr(vp.STATE, 'n', 360)
+    monkeypatch.setattr(vp.STATE, 'subp', {})
+
+    before = vp.render_frame(175).convert('RGB').tobytes()   # t=5.83 (章1のみ)
+    boundary = vp.render_frame(180).convert('RGB').tobytes() # t=6.00 (クロスフェード)
+    after = vp.render_frame(185).convert('RGB').tobytes()    # t=6.17 (章2寄り)
+
+    assert before != boundary
+    assert boundary != after
+    # 境界の絵は、単独で描いたどちらの章とも異なる
+    vp.STATE.tl = [ch1]
+    vp.STATE.segs = SEGS
+    vp.STATE.keys = ['ch1']
+    only_first = vp.render_frame(180).convert('RGB').tobytes()
+    assert boundary != only_first
+
+
+def test_subtitle_pages_advance_with_time(golden_vp, monkeypatch):
+    """長い文は複数ページに分かれ、時刻が進むと字幕が切り替わる。"""
+    vp, _ = golden_vp
+    long_text = '彼は、まず城へ行き、次に町へ行き、それから川を渡り、さらに山を登り、最後に寺に着きました。' + \
+                'その後、また戻ってきて、もう一度同じ道を通り、別の場所へ向かいました。' + \
+                'こうして、長い一日が終わり、夜になって、静かな場面になりました。'
+    seg = {'scene': 0, 'text': long_text, 'start': 0.5, 'end': 5.5,
+           'pauses': [], 'cue_times': []}
+    monkeypatch.setattr(vp.STATE, 'segs', [seg])
+    monkeypatch.setattr(vp.STATE, 'subp', {})
+    d = ImageDraw.Draw(Image.new('RGB', (8, 8)))
+    pages = vp.sub_lines(d, seg, vp.FSUB[52], 1.0)
+    later = vp.sub_lines(d, seg, vp.FSUB[52], 4.0)
+    assert pages != later, '長い文の字幕ページが時刻で切り替わらない'
 
 
 def test_render_frame_pixel_hashes(golden_vp):

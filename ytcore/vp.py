@@ -1198,21 +1198,61 @@ def _code_fp():
     return h.hexdigest()
 
 
-def _part_fp(a, b, codefp):
-    """フレーム a〜b の部品の指紋：該当する章（と前後の章）の定義、文の時刻、画像ファイル、全体の長さ、描画コード"""
-    t0, t1 = a / 30 - 1.0, b / 30 + 1.0
-    cis = sorted({x for ci, c in enumerate(STATE.tl) if c['end'] >= t0 and c['start'] <= t1
-                  for x in (ci - 1, ci, ci + 1) if 0 <= x < len(STATE.tl)})
-    h = hashlib.sha1()
+def _chapter_image_names(chapter):
+    """章が使う画像キーを再帰的に集める（img / portrait / base / art / battle_map）。"""
+    names = set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            for k in ('img', 'portrait', 'base'):
+                v = o.get(k)
+                if isinstance(v, str):
+                    names.add(v)
+            if o.get('t') == 'art' and isinstance(o.get('name'), str):
+                names.add(o['name'])
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    walk(chapter)
+    return names
+
+
+def _chapter_fp(ci):
+    """章 ci の定義・文の時刻・画像の指紋。他章に影響されない。"""
     imgs = {}
-    for k, m in (STATE.spec.get('images') or {}).items():
+    for k in sorted(_chapter_image_names(STATE.spec['chapters'][ci])):
+        m = (STATE.spec.get('images') or {}).get(k)
+        if not m:
+            continue
         f = P(m['file'])
         imgs[k] = [m, f.stat().st_size if f.exists() else -1,
                    f.stat().st_mtime_ns if f.exists() else -1]
-    h.update(json.dumps([STATE.spec.get('style'), imgs, STATE.n, codefp], sort_keys=True, ensure_ascii=False).encode())
+    return hashlib.sha1(json.dumps(
+        [ci, STATE.spec['chapters'][ci], STATE.tl[ci],
+         [x for x in STATE.segs if x['scene'] == ci], imgs],
+        sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _part_fp(a, b, codefp, chapter_fps=None):
+    """フレーム a〜b の部品の指紋。
+
+    共通の描画コード・全体長と、part がまたぐ章（前後1章含む）の指紋だけを使う。
+    他章の spec / 画像を変えても、この part は再利用できる。
+    """
+    t0, t1 = a / 30 - 1.0, b / 30 + 1.0
+    cis = sorted({x for ci, c in enumerate(STATE.tl) if c['end'] >= t0 and c['start'] <= t1
+                  for x in (ci - 1, ci, ci + 1) if 0 <= x < len(STATE.tl)})
+    if chapter_fps is None:
+        chapter_fps = {ci: _chapter_fp(ci) for ci in cis}
+    h = hashlib.sha1()
+    h.update(json.dumps([STATE.spec.get('style'), STATE.n, codefp],
+                        sort_keys=True, ensure_ascii=False).encode())
     for ci in cis:
-        h.update(json.dumps([ci, STATE.spec['chapters'][ci], STATE.tl[ci], [x for x in STATE.segs if x['scene'] == ci]],
-                            sort_keys=True, ensure_ascii=False).encode())
+        h.update(str(ci).encode())
+        h.update(chapter_fps[ci].encode())
     return h.hexdigest()
 def stage_build(chunk=1000, bgm_db=-6.0):
     load_runtime()
@@ -1221,7 +1261,9 @@ def stage_build(chunk=1000, bgm_db=-6.0):
     full = os.environ.get('VP_FULL') == '1'
     import time as _t
     codefp = _code_fp()
-    fps = {a: _part_fp(a, min(a + chunk, STATE.n), codefp) for a in range(0, STATE.n, chunk)}
+    chapter_fps = {ci: _chapter_fp(ci) for ci in range(len(STATE.tl))}
+    fps = {a: _part_fp(a, min(a + chunk, STATE.n), codefp, chapter_fps)
+           for a in range(0, STATE.n, chunk)}
     pending, reused = [], 0
     for a in range(0, STATE.n, chunk):
         mp = P(f'cache/{STATE.slug}_part_{a}_{a + chunk}.mp4')
@@ -1554,11 +1596,13 @@ def _cmd_refp(args):
     load_runtime()
     ch = int(os.environ.get('VP_CHUNK', 1000))
     cf = _code_fp()
+    chapter_fps = {ci: _chapter_fp(ci) for ci in range(len(STATE.tl))}
     n_ = 0
     for a in range(0, STATE.n, ch):
         mp = P(f'cache/{STATE.slug}_part_{a}_{a+ch}.mp4')
         if mp.exists() and mp.stat().st_size > 0:
-            P(f'cache/{STATE.slug}_part_{a}_{a+ch}.fp').write_text(_part_fp(a, min(a + ch, STATE.n), cf), encoding='utf8')
+            P(f'cache/{STATE.slug}_part_{a}_{a+ch}.fp').write_text(
+                _part_fp(a, min(a + ch, STATE.n), cf, chapter_fps), encoding='utf8')
             n_ += 1
     print('re-stamped', n_, 'parts')
 

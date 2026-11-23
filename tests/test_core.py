@@ -152,6 +152,58 @@ def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
 
 # ---- 二重起動防止
 
+def test_part_fingerprint_is_isolated_per_chapter(vp, tmp_path):
+    """他章の spec / 画像を変えても、ある章だけを含む part の指紋は変わらない。"""
+    import json
+    from PIL import Image
+
+    (tmp_path / 'data').mkdir(exist_ok=True)
+    (tmp_path / 'assets').mkdir(exist_ok=True)
+    for name, col in (('a.png', (1, 2, 3)), ('b.png', (4, 5, 6)), ('c.png', (7, 8, 9))):
+        Image.new('RGB', (8, 8), col).save(tmp_path / 'assets' / name)
+    spec = {
+        'theme_dir': 't', 'header_sub': 'h',
+        'chapters': [
+            {'key': 'a', 'title': 'A', 'scene': [{'t': 'image', 'name': 'ia', 'box': [0, 0, 10, 10]}]},
+            {'key': 'b', 'title': 'B', 'scene': [{'t': 'image', 'name': 'ib', 'box': [0, 0, 10, 10]}]},
+            {'key': 'c', 'title': 'C', 'scene': [{'t': 'image', 'name': 'ic', 'box': [0, 0, 10, 10]}]},
+        ],
+        'images': {
+            'ia': {'file': 'assets/a.png'},
+            'ib': {'file': 'assets/b.png'},
+            'ic': {'file': 'assets/c.png'},
+        },
+        'bgm': [],
+    }
+    (tmp_path / 'data' / 'x_spec.json').write_text(json.dumps(spec, ensure_ascii=False), encoding='utf8')
+    (tmp_path / 'data' / 'x_timeline.json').write_text(json.dumps([
+        {'key': 'a', 'id': 0, 'start': 0.0, 'duration': 2.0, 'end': 2.0},
+        {'key': 'b', 'id': 1, 'start': 2.0, 'duration': 2.0, 'end': 4.0},
+        {'key': 'c', 'id': 2, 'start': 4.0, 'duration': 2.0, 'end': 6.0},
+    ], ensure_ascii=False), encoding='utf8')
+    (tmp_path / 'out').mkdir(exist_ok=True)
+    (tmp_path / 'out' / 'x_audio_report.json').write_text(json.dumps({'segments': []}, ensure_ascii=False), encoding='utf8')
+
+    vp.load_spec('x')
+    vp.load_runtime()
+    codefp = 'dummy-code-fp'
+    chapter_fps = {ci: vp._chapter_fp(ci) for ci in range(len(vp.STATE.tl))}
+    # 章Aの part（前後1章 = 章B までを見る）と章Cの part
+    a_before = vp._part_fp(0, 29, codefp, chapter_fps)
+    c_before = vp._part_fp(120, 149, codefp, chapter_fps)
+
+    spec['chapters'][2]['title'] = 'C改'
+    (tmp_path / 'data' / 'x_spec.json').write_text(json.dumps(spec, ensure_ascii=False), encoding='utf8')
+    vp.load_spec('x')
+    vp.load_runtime()
+    chapter_fps2 = {ci: vp._chapter_fp(ci) for ci in range(len(vp.STATE.tl))}
+    a_after = vp._part_fp(0, 29, codefp, chapter_fps2)
+    c_after = vp._part_fp(120, 149, codefp, chapter_fps2)
+
+    assert a_after == a_before   # 2章先の章Cを変えても章Aの part は再利用できる
+    assert c_after != c_before   # 章Cの part は作り直す
+
+
 def test_render_state_keeps_two_specs_independent(vp, monkeypatch, tmp_path):
     """2つの RenderState を切り替えても、互いの spec/timeline が混ざらない。"""
     import json
