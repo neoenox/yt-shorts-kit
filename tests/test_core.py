@@ -137,6 +137,16 @@ def test_lock_alive_detects_current_process():
     assert not vp_lock.alive(-1)
 
 
+def test_lock_others_counts_prep_and_audio_as_builds(tmp_path, monkeypatch):
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    (cache / 'other1.lock').write_text(f'{os.getpid()} prep 12:00:00', encoding='utf8')
+    (cache / 'other2.lock').write_text(f'{os.getpid()} audio 12:00:00', encoding='utf8')
+    (cache / 'other3.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    (cache / 'self.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    assert vp_lock.others(tmp_path, 'self') == 3
+
+
 # ---- 字幕書き出し・映像エンコードの共有部品
 
 def test_srt_time_and_write_srt(tmp_path):

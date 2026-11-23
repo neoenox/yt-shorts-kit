@@ -85,7 +85,9 @@ def others(root, slug):
         if f.stem == slug:
             continue
         pid, c = _read(f)
-        if pid and alive(pid) and c.startswith('build'):
+        # acquire は build / audio / prep を同じロックで守る。build だけ数えると
+        # prep と build が同時に走り、部品のキャッシュを消し合う。
+        if pid and alive(pid) and c.split(' ')[0] in ('build', 'audio', 'prep'):
             n += 1
         elif pid and not alive(pid):
             try:
