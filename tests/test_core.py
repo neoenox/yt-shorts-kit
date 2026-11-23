@@ -250,6 +250,9 @@ def test_lock_others_counts_prep_and_audio_as_builds(tmp_path, monkeypatch):
     (cache / 'other2.lock').write_text(f'{os.getpid()} audio 12:00:00', encoding='utf8')
     (cache / 'other3.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
     (cache / 'self.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    # Simulate lock contention for these metadata-only fixtures. Real OS-level
+    # contention and stale-file behavior are exercised in tests/test_lock.py.
+    monkeypatch.setattr(vp_lock, '_try_lock', lambda fd: False)
     assert vp_lock.others(tmp_path, 'self') == 3
 
 
