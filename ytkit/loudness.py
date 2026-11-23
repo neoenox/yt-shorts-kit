@@ -27,7 +27,9 @@ def measure_loudnorm(path, ffmpeg='ffmpeg', i=TARGET_LUFS, tp=TARGET_TP, lra=7):
                         'loudnorm=I=%s:TP=%s:LRA=%s:print_format=json' % (_n(i), _n(tp), _n(lra)),
                         '-f', 'null', '-'],
                        capture_output=True, text=True, errors='replace')
-    m = re.search(r'\{[^{}]*"input_i"[^{}]*\}', r.stderr, re.S)
+    # loudnorm は JSON の直前にヘッダ行を出し、{ と "input_i" の間にも改行/タブを入れる。
+    # 例: '{\n\t"input_i" : "-21.75",\n ... }'。区切りを [^{}] にすると一致しない。
+    m = re.search(r'\{.*?"input_i".*?\}', r.stderr, re.S)
     if not m:
         return None
     try:

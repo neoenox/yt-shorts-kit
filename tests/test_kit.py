@@ -29,6 +29,30 @@ def test_loudnorm_filter_matches_rekishikaisetu_vp_two_pass():
     assert loudness.loudnorm_filter(M, -14, -1.5, 9) == old
 
 
+def test_measure_loudnorm_parses_real_ffmpeg_json_layout(monkeypatch):
+    """ffmpeg は { と \"input_i\" の間に改行とタブを入れる。移行前の正規表現はこれに不一致だった。"""
+    stderr = '''[Parsed_loudnorm_0 @ 00000183c23d6b40]
+{
+\t"input_i" : "-15.3",
+\t"input_tp" : "-1.4",
+\t"input_lra" : "4.2",
+\t"input_thresh" : "-25.6",
+\t"output_i" : "-14.0",
+\t"target_offset" : "0.3"
+}
+[out#0/null @ 00000183c0472800] video:0KiB audio:750KiB'''
+
+    class Result:
+        pass
+
+    result = Result()
+    result.stderr = stderr
+    monkeypatch.setattr(loudness.subprocess, 'run', lambda *a, **kw: result)
+    got = loudness.measure_loudnorm('x.wav')
+    assert got is not None
+    assert all(got[k] == v for k, v in M.items())
+
+
 # ---- voicevox
 
 def test_apply_pron_longest_key_first():
