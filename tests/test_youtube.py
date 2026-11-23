@@ -79,6 +79,19 @@ def test_discover_returns_channel_ids(monkeypatch):
     assert found == [{'id': 'UC9', 'topic': '歴史', 'title': '似たチャンネル', 'description': ''}]
 
 
+def test_discover_respects_total_limit_across_topics(monkeypatch):
+    calls = []
+
+    def fake_get(path, params, api_key, timeout=30):
+        calls.append(params['maxResults'])
+        return {'items': [{'snippet': {'channelId': 'UC' + str(len(calls))}} for _ in range(10)]}
+
+    monkeypatch.setattr(youtube, '_get', fake_get)
+    found = youtube.discover(['歴史', '雑学', '科学'], 'key', limit=6)
+    assert len(found) == 6
+    assert all(n <= 2 for n in calls)   # 6 / 3 = 2 件ずつ
+
+
 def test_main_writes_markdown_and_json(tmp_path, monkeypatch):
     monkeypatch.setenv('YOUTUBE_API_KEY', 'key')
     monkeypatch.setattr(youtube, '_config', lambda: (
@@ -105,8 +118,10 @@ def test_main_requires_api_key(tmp_path, monkeypatch):
 RSS_FEED = '''<?xml version="1.0"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:yt="http://www.youtube.com/xml/schemas/2015">
   <title>RSSチャンネル</title>
-  <entry><title>A #shorts</title><published>2026-01-01T00:00:00Z</published><yt:videoId>a</yt:videoId></entry>
-  <entry><title>B</title><published>2026-01-08T00:00:00Z</published><yt:videoId>b</yt:videoId></entry>
+  <entry><title>A #shorts</title><published>2026-01-01T00:00:00Z</published><yt:videoId>a</yt:videoId>
+    <category term="教育"/><yt:tags><yt:tag>#解説</yt:tag></yt:tags></entry>
+  <entry><title>B です</title><published>2026-01-08T00:00:00Z</published><yt:videoId>b</yt:videoId>
+    <category term="ショート"/><yt:tags><yt:tag>#雑学</yt:tag></yt:tags></entry>
 </feed>'''
 
 
@@ -116,12 +131,17 @@ def test_feed_snapshot_parses_public_rss(monkeypatch):
     assert info['title'] == 'RSSチャンネル'
     assert len(records) == 2
     assert records[0]['views'] is None and records[0]['duration_seconds'] is None
-    assert records[0]['is_short'] is True and records[1]['is_short'] is False
+    assert records[0]['is_short'] is True
+    # タイトルに #shorts が無くても、RSS のカテゴリ/タグから Short と判定する
+    assert records[1]['is_short'] is True
+    assert set(records[0]['tags']) == {'shorts', '教育', '解説'}
 
     s = youtube.summarize(info, records)
     assert s['avg_views'] is None and s['avg_engagement_pct'] is None
+    assert s['short_ratio'] == 1.0
+    assert set(s['top_hashtags']) == {'shorts', '解説', '雑学', '教育', 'ショート'}
     md = youtube.report_markdown([s])
-    assert '| RSSチャンネル | 2 | - | - | - | 50% |' in md
+    assert '| RSSチャンネル | 2 | - | - | - | 100% |' in md
 
 
 def test_main_feed_writes_report_without_api_key(tmp_path, monkeypatch):

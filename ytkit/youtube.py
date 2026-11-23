@@ -128,7 +128,12 @@ def feed_snapshot(channel_id, limit=15, timeout=30):
     records = []
     for e in root.findall('a:entry', ATOM)[:limit]:
         entry_title = e.findtext('a:title', namespaces=ATOM) or ''
-        tags = [m.group(1).lower() for m in HASHTAG.finditer(entry_title)]
+        # RSS のタグ（yt:tags/yt:tag と category）も集計に使う。タイトル内の # だけだと
+        # ハッシュタグをタイトルに付けない動画が Short として数えられない。
+        tags = [t.text.strip() for t in e.findall('yt:tags/yt:tag', ATOM) if t.text]
+        tags += [t.get('term', '').strip() for t in e.findall('a:category', ATOM) if t.get('term')]
+        tags += [m.group(1) for m in HASHTAG.finditer(entry_title)]
+        tags = list(dict.fromkeys(t.lower().lstrip('#') for t in tags))
         records.append({
             'id': e.findtext('yt:videoId', namespaces=ATOM),
             'title': entry_title,
@@ -138,14 +143,15 @@ def feed_snapshot(channel_id, limit=15, timeout=30):
             'comments': None,
             'duration_seconds': None,
             'is_short': any(t in ('shorts', 'short', 'ショート') for t in tags),
-            'tags': [],
+            'tags': tags,
         })
     return {'id': channel_id, 'title': title, 'uploads': ''}, records
 
 
 def _hashtags(record):
-    text = record['title'] + ' ' + ' '.join(record['tags'])
-    return [m.group(1).lower() for m in HASHTAG.finditer(text)]
+    tags = [m.group(1).lower() for m in HASHTAG.finditer(record['title'])]
+    tags += [t.lower().lstrip('#') for t in (record.get('tags') or [])]
+    return list(dict.fromkeys(tags))
 
 
 def summarize(info, records):
@@ -203,12 +209,23 @@ def report_markdown(summaries):
 
 
 def discover(topics, api_key, limit=10, timeout=30):
-    """キーワードから似たジャンルのチャンネルを探す（search.listは quota を多く使う）。"""
+    """キーワードから似たジャンルのチャンネルを探す（search.listは quota を多く使う）。
+
+    limit は全トピック合計の上限。トピック数で割って各 search.list の maxResults に渡す。
+    """
+    topics = list(topics)
+    if not topics:
+        return []
+    per = max(1, limit // len(topics))
     found = []
     for topic in topics:
+        if len(found) >= limit:
+            break
         data = _get('/search', {'part': 'snippet', 'type': 'channel', 'q': topic,
-                                'maxResults': min(50, limit)}, api_key, timeout)
+                                'maxResults': min(50, limit - len(found), per)}, api_key, timeout)
         for item in data.get('items') or []:
+            if len(found) >= limit:
+                break
             sn = item.get('snippet') or {}
             found.append({'id': sn.get('channelId'), 'topic': topic,
                           'title': sn.get('title', ''),
