@@ -153,11 +153,20 @@ def test_srt_time_and_write_srt(tmp_path):
     assert subtitles.srt_time(0) == '00:00:00,000'
     assert subtitles.srt_time(61.5) == '00:01:01,500'
     assert subtitles.srt_time(3661.25) == '01:01:01,250'
+    assert subtitles.srt_time(-0.001) == '00:00:00,000'   # 負の時刻は SRT で無効
     out = tmp_path / 'test.srt'
     subtitles.write_srt(out, [(0, 1.5, '一行目'), (60, 61.5, '二行目')])
     assert out.read_text(encoding='utf8') == (
         '1\n00:00:00,000 --> 00:00:01,500\n一行目\n\n'
         '2\n00:01:00,000 --> 00:01:01,500\n二行目\n')
+
+
+def test_subtitle_chunks_handles_empty_text(vp):
+    m2 = importlib.import_module('ytcore.make_short2')
+    segs = [{'i': 0, 'text': '', 'start': 0.0, 'end': 2.0}]
+    cks = m2.subtitle_chunks(segs)
+    assert len(cks) == 1
+    assert cks[0][0] == 0.0 and cks[0][1] == 2.0
 
 
 def test_encode_frames_writes_frames_and_reports_failure(vp, monkeypatch, tmp_path):
