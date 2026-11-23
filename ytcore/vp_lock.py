@@ -42,7 +42,8 @@ def alive(pid):
 
 def _read(path):
     try:
-        pid, _, cmd = Path(path).read_text(encoding='utf8').partition(' ')
+        text = Path(path).read_text(encoding='utf8').lstrip('\\0')
+        pid, _, cmd = text.partition(' ')
         return int(pid), cmd.strip()
     except Exception:
         return 0, ''
