@@ -901,11 +901,41 @@ class _Maou(dict):
         m=re.match(r'([a-z]+)(\d+)$',k);return s._JP.get(m.group(1),m.group(1))+m.group(2)
 MAOU=_Maou()
 def stage_desc():
-    ds=SPEC['desc'];chapters,dur=chapter_list();used=sorted({it['name'] for ch in SPEC['chapters'] for it in ch['scene'] if it['t']=='image'})
-    imglines=[f"・{SPEC['images'][n]['credit']}:{SPEC['images'][n]['source_url']}" for n in used if SPEC['images'][n].get('credit')]
-    tracks=' / '.join(MAOU[x] for x in dict.fromkeys(b[2] for b in SPEC['bgm']))
-    L=[f'# YouTube 投稿用ドラフト：{ds["title_main"]}\n','## タイトル案']+[f'{i+1}. {t}' for i,t in enumerate(ds['titles'])]+['','## 概要欄(そのまま貼り付け用)\n','```',ds['intro'],'','■ チャプター']+chapters+['','■ 動画で確かめたこと(要点)']+[f'・{p}' for p in ds['points']]+['','■ 参考資料(確認に使ったもの)']+[f'・{r}' for r in ds['refs']]+['','■ 出典・クレジット']+ds.get('credit_lines',[])+imglines+[VOICE['credit_long'],BGM['credit_long'].format(tracks=tracks),'・図・表・年表:自作','','■ 注意']+[f'・{n}' for n in ds['notes']]+['・詳しい出典と素材のクレジットは、この概要欄にまとめています。','','■ このチャンネルについて',CH['about'],'```\n','## タグ案',ds['tags']+'\n','## 投稿前チェック(自分で確認が必要)']+[f'- [ ] {c}' for c in ds.get('checks',[])]+['- [ ] YouTubeの設問(AIの使用):完成動画の表現を公式基準と照合し、Studioの「AIの使用」を設定(サムネイル背景の生成画像・合成音声(VOICEVOX)を含めて、本物の人物・出来事と誤認させる表現がないか確認)','- [ ] **動画を通しで見る・聞く**(動き、ナレーションの読み、BGMの音量、画像の切り出しと説明の整合)','- [ ] 概要欄の外部リンクに必要な機能利用資格をStudioで確認し、公開後にリンクが開けるか確認する',f'- [ ] {CH["terms_check"]}',f'- [ ] 字幕:`out/{SLUG}_subtitles.srt` をアップロード(日本語)','- [ ] サムネイルを設定し、投稿後の表示(スマートフォンの小さな表示)を確認','']
-    P(f'out/{SLUG}_description.md').write_text('\n'.join(L)+'\n',encoding='utf8');print('\n'.join(chapters),'\nduration',f'{int(dur//60)}分{int(dur%60)}秒')
+    ds = SPEC['desc']
+    chapters, dur = chapter_list()
+    used = sorted({it['name'] for ch in SPEC['chapters'] for it in ch['scene'] if it['t'] == 'image'})
+    imglines = [f"・{SPEC['images'][n]['credit']}:{SPEC['images'][n]['source_url']}"
+                for n in used if SPEC['images'][n].get('credit')]
+    tracks = ' / '.join(MAOU[x] for x in dict.fromkeys(b[2] for b in SPEC['bgm']))
+
+    L = [f'# YouTube 投稿用ドラフト：{ds["title_main"]}\n', '## タイトル案']
+    L += [f'{i + 1}. {t}' for i, t in enumerate(ds['titles'])]
+    L += ['', '## 概要欄(そのまま貼り付け用)\n', '```', ds['intro'], '', '■ チャプター']
+    L += chapters
+    L += ['', '■ 動画で確かめたこと(要点)']
+    L += [f'・{p}' for p in ds['points']]
+    L += ['', '■ 参考資料(確認に使ったもの)']
+    L += [f'・{r}' for r in ds['refs']]
+    L += ['', '■ 出典・クレジット']
+    L += ds.get('credit_lines', [])
+    L += imglines
+    L += [VOICE['credit_long'], BGM['credit_long'].format(tracks=tracks), '・図・表・年表:自作', '', '■ 注意']
+    L += [f'・{n}' for n in ds['notes']]
+    L += ['・詳しい出典と素材のクレジットは、この概要欄にまとめています。',
+          '', '■ このチャンネルについて', CH['about'], '```\n',
+          '## タグ案', ds['tags'] + '\n', '## 投稿前チェック(自分で確認が必要)']
+    L += [f'- [ ] {c}' for c in ds.get('checks', [])]
+    L += [
+        '- [ ] YouTubeの設問(AIの使用):完成動画の表現を公式基準と照合し、Studioの「AIの使用」を設定(サムネイル背景の生成画像・合成音声(VOICEVOX)を含めて、本物の人物・出来事と誤認させる表現がないか確認)',
+        '- [ ] **動画を通しで見る・聞く**(動き、ナレーションの読み、BGMの音量、画像の切り出しと説明の整合)',
+        '- [ ] 概要欄の外部リンクに必要な機能利用資格をStudioで確認し、公開後にリンクが開けるか確認する',
+        f'- [ ] {CH["terms_check"]}',
+        f'- [ ] 字幕:`out/{SLUG}_subtitles.srt` をアップロード(日本語)',
+        '- [ ] サムネイルを設定し、投稿後の表示(スマートフォンの小さな表示)を確認',
+        '',
+    ]
+    P(f'out/{SLUG}_description.md').write_text('\n'.join(L) + '\n', encoding='utf8')
+    print('\n'.join(chapters), '\nduration', f'{int(dur // 60)}分{int(dur % 60)}秒')
 def stage_thumb():
     th=SPEC['thumb'];W,H=1280,720;FDW=FONTS['dir']
     def font(n):
