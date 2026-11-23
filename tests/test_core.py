@@ -112,8 +112,8 @@ def test_snap_bounds_uses_pauses_and_keeps_minimum_cue(vp):
 
 
 def test_ctx_respects_at_and_until(vp, monkeypatch):
-    monkeypatch.setattr(vp, 'SEGS', [{'scene': 0, 'start': 1.0, 'end': 3.0}])
-    monkeypatch.setattr(vp, 'KEYS', ['章'])
+    monkeypatch.setattr(vp.STATE, 'segs', [{'scene': 0, 'start': 1.0, 'end': 3.0}])
+    monkeypatch.setattr(vp.STATE, 'keys', ['章'])
     cx = vp.Ctx(0, 2.0)
     assert cx.vis({'at': 0}) is True
     assert cx.vis({'at': 1}) is False
@@ -151,6 +151,40 @@ def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
 
 
 # ---- 二重起動防止
+
+def test_render_state_keeps_two_specs_independent(vp, monkeypatch, tmp_path):
+    """2つの RenderState を切り替えても、互いの spec/timeline が混ざらない。"""
+    import json
+    (tmp_path / 'data').mkdir(exist_ok=True)
+    (tmp_path / 'out').mkdir(exist_ok=True)
+    for slug, title in (('a', 'A章'), ('b', 'B章')):
+        (tmp_path / 'data' / f'{slug}_spec.json').write_text(json.dumps({
+            'theme_dir': 't', 'header_sub': 'h',
+            'chapters': [{'key': 'ch', 'title': title, 'chapter_title': title, 'scene': []}],
+            'images': {}, 'bgm': [],
+        }, ensure_ascii=False), encoding='utf8')
+        (tmp_path / 'data' / f'{slug}_timeline.json').write_text(json.dumps(
+            [{'key': 'ch', 'id': 0, 'start': 0.0, 'duration': 5.0, 'end': 5.0}], ensure_ascii=False), encoding='utf8')
+        (tmp_path / 'out' / f'{slug}_audio_report.json').write_text(json.dumps({'segments': []}, ensure_ascii=False), encoding='utf8')
+
+    states = []
+    for slug in ('a', 'b'):
+        st = vp.RenderState()
+        st.load_spec(slug)
+        st.load_runtime()
+        states.append(st)
+
+    assert states[0].spec['chapters'][0]['title'] == 'A章'
+    assert states[1].spec['chapters'][0]['title'] == 'B章'
+    assert states[0].keys == states[1].keys == ['ch']
+    # proxy は各 state の現在値を読む（差し替えにも追従）
+    pa, pb = states[0].as_dict(), states[1].as_dict()
+    assert pa['SPEC'] is states[0].spec
+    assert pb['SPEC'] is states[1].spec
+    assert pa['P']('x') == vp.P('x')
+    states[0].load_spec('a')   # 再ロードしても pb は影響しない
+    assert pb['SPEC'] is states[1].spec
+
 
 def test_lock_alive_detects_current_process():
     assert vp_lock.alive(os.getpid())

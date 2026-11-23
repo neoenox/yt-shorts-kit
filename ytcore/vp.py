@@ -61,14 +61,13 @@ COL = {'gold': GOLD, 'white': WHITE, 'dim': DIM, 'org': ORG,
 SPEC_F = {'sans': (FONTS['sans'], 560), 'sub': (FONTS['sans'], 640), 'serif': (FONTS['serif'], 800)}
 
 
-_FC = {}
 def vfont(kind, size):
     k = (kind, size)
-    if k not in _FC:
+    if k not in STATE.font_cache:
         f = ImageFont.truetype(FONTS['dir'] + SPEC_F[kind][0], size)
         f.set_variation_by_axes([SPEC_F[kind][1]])
-        _FC[k] = f
-    return _FC[k]
+        STATE.font_cache[k] = f
+    return STATE.font_cache[k]
 
 
 class _Fam:
@@ -82,12 +81,76 @@ class _Fam:
 F = _Fam('sans')
 FB = _Fam('serif')
 FSUB = _Fam('sub')
-SLUG = None
-SPEC = None
-TL = None
-SEGS = None
-N = 0
-KEYS = []
+
+
+class _StateProxy(dict):
+    """vp_anim / vp_check などに渡す、現在の RenderState を読む辞書。
+
+    bind(g) は g['SPEC'] のようにキーアクセスする。辞書をコピーすると
+    load_spec() 後の差し替えに追従できないので、属性へ都度読みに行く。
+    """
+
+    def __init__(self, state):
+        super().__init__()
+        self._state = state
+
+    # 旧 globals() のキー -> RenderState の属性名
+    _KEYS = {
+        'SLUG': 'slug', 'SPEC': 'spec', 'TL': 'tl', 'SEGS': 'segs',
+        'N': 'n', 'KEYS': 'keys', 'IMAGES': 'images', 'ART': 'arts',
+    }
+
+    def __getitem__(self, key):
+        name = self._KEYS.get(key, key)
+        if hasattr(self._state, name):
+            return getattr(self._state, name)
+        # P / ITEMS / F / header / wrapn など、旧 globals() にあった関数・定数
+        return globals()[key]
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except (AttributeError, KeyError):
+            return default
+
+    def __contains__(self, key):
+        name = self._KEYS.get(key, key)
+        return hasattr(self._state, name) or key in globals()
+
+
+class RenderState:
+    """1つの動画の描画に必要な状態。複数インスタンスを同時に保持できる。"""
+
+    def __init__(self):
+        self.slug = None
+        self.spec = None
+        self.tl = None
+        self.segs = None
+        self.n = 0
+        self.keys = []
+        self.images = {}      # get_img のキャッシュ
+        self.arts = {}        # it_art のキャッシュ
+        self.subp = {}        # sub_lines のキャッシュ
+        self.font_cache = {}  # vfont のキャッシュ（共有でも可だが state に置く）
+        self.anim_bound = [False]
+
+    def as_dict(self):
+        """旧 globals() と同じように使える proxy 辞書を返す。"""
+        return _StateProxy(self)
+
+    def load_spec(self, slug):
+        self.slug = slug
+        self.spec = _conv_display(json.loads(P(f'data/{slug}_spec.json').read_text(encoding='utf8')))
+        return self.spec
+
+    def load_runtime(self):
+        self.tl = json.loads(P(f'data/{self.slug}_timeline.json').read_text(encoding='utf8'))
+        self.segs = json.loads(P(f'out/{self.slug}_audio_report.json').read_text(encoding='utf8'))['segments']
+        self.n = round(self.tl[-1]['end'] * 30)
+        self.keys = [c['key'] for c in self.tl]
+
+
+STATE = RenderState()
 
 
 def P(rel):
@@ -110,23 +173,20 @@ def _conv_display(o):
     if isinstance(o,dict):return {k:(_cv(v) if k in _TXT else _conv_display(v)) for k,v in o.items()}
     if isinstance(o,list):return [_conv_display(v) for v in o]
     return o
-def load_spec(slug):
-    global SLUG, SPEC
-    SLUG = slug
-    SPEC = _conv_display(json.loads(P(f'data/{slug}_spec.json').read_text(encoding='utf8')))
-    return SPEC
+def load_spec(slug, state=None):
+    state = state or STATE
+    return state.load_spec(slug)
 
 
-def theme_dir():
-    return P('docs/themes') / SPEC['theme_dir']
+def theme_dir(state=None):
+    state = state or STATE
+    return P('docs/themes') / state.spec['theme_dir']
 
 
-def load_runtime():
-    global TL, SEGS, N, KEYS
-    TL = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
-    SEGS = json.loads(P(f'out/{SLUG}_audio_report.json').read_text(encoding='utf8'))['segments']
-    N = round(TL[-1]['end'] * 30)
-    KEYS = [c['key'] for c in TL]
+def load_runtime(state=None):
+    state = state or STATE
+    state.load_runtime()
+    return state
 # ---------------------------------------------------------------- text helpers
 def tw(d, t, f):
     return d.textlength(t, font=f)
@@ -225,8 +285,8 @@ class Ctx:
     def __init__(s, ci, t):
         s.ci = ci
         s.t = t
-        s.key = KEYS[ci]
-        s.segl = [x for x in SEGS if x['scene'] == ci]
+        s.key = STATE.keys[ci]
+        s.segl = [x for x in STATE.segs if x['scene'] == ci]
         s.st = [x['start'] for x in s.segl]
 
     def on(s, i):
@@ -246,21 +306,20 @@ class Ctx:
 
 
 # ---------------------------------------------------------------- images
-_IMG = {}
 
 
 def get_img(name, w, h):
     k = (name, w, h)
-    if k not in _IMG:
-        meta = SPEC['images'][name]
+    if k not in STATE.images:
+        meta = STATE.spec['images'][name]
         im = Image.open(P(meta['file'])).convert('RGB')
         c = meta.get('crop')
         if c:
             im = im.crop((int(im.width * c[0]), int(im.height * c[1]),
                           int(im.width * c[2]), int(im.height * c[3])))
         s = min(w / im.width, h / im.height)
-        _IMG[k] = im.resize((max(1, int(im.width * s)), max(1, int(im.height * s))), Image.LANCZOS)
-    return _IMG[k]
+        STATE.images[k] = im.resize((max(1, int(im.width * s)), max(1, int(im.height * s))), Image.LANCZOS)
+    return STATE.images[k]
 def it_image(im,d,cx,it):
     a=cx.a(it.get('at'))
     if a<=0 or not cx.vis(it):return
@@ -273,7 +332,7 @@ def it_image(im,d,cx,it):
 # ---------------------------------------------------------------- item renderers
 def it_stack(im,d,cx,it):
     x0,x1,y=it.get('x0',60),it.get('x1',930),it.get('y0',170);size=it.get('size',34);gap=it.get('gap',14);ymax=it.get('ymax',850)
-    pop=SPEC.get('style')=='pop'
+    pop=STATE.spec.get('style')=='pop'
     if pop:size=min(size+6,42);gap=gap+2
     for e in it['items']:
         if not cx.vis(e):continue
@@ -382,7 +441,7 @@ def it_bars(im,d,cx,it):
     if not vis_any:return
     box_fill(d,(x0,y0,x1,y1),1.0);yy=y0+12
     if title:line_text(d,(x0+22,yy),title,FB[34],GOLD,1.0);yy+=52
-    pop=SPEC.get('style')=='pop'
+    pop=STATE.spec.get('style')=='pop'
     rh=min(96 if pop else 70,(y1-yy-14)//len(data));lab_w=it.get('lab_w',300);fs=32
     if pop:
         fs=max(32,min(48,rh-26))
@@ -396,7 +455,7 @@ def it_bars(im,d,cx,it):
         line_text(d,(x0+lab_w+L+14,ry+4),e.get('vlabel',f"{e['value']:,}{unit}"),F[fs],WHITE,a)
 def it_table(im,d,cx,it):
     x0,y0,x1,y1=it['box'];cols=it['cols'];rows=it['rows'];size=it.get('size',32);cw=it.get('colw') or [ (x1-x0-40)/len(cols) ]*len(cols)
-    pop=SPEC.get('style')=='pop'
+    pop=STATE.spec.get('style')=='pop'
     if pop and '_fit' in it:size=it['_fit']
     elif pop:
         _d0=ImageDraw.Draw(Image.new('RGBA',(8,8)));best=24
@@ -567,7 +626,6 @@ def it_swirl(im, d, cx, it):
         yy += int(it.get('lsize', 34) * 1.3)
 
 
-_ART = {}
 
 
 def it_art(im, d, cx, it):
@@ -580,12 +638,12 @@ def it_art(im, d, cx, it):
         return
     x0, y0, x1, y1 = it['box']
     w, h, name = x1 - x0, y1 - y0, it['name']
-    if name not in _ART:
-        src = Image.open(P(SPEC['images'][name]['file'])).convert('RGB')
+    if name not in STATE.arts:
+        src = Image.open(P(STATE.spec['images'][name]['file'])).convert('RGB')
         sc = max(w / src.width, h / src.height) * 1.14
         base = src.resize((int(src.width * sc) + 1, int(src.height * sc) + 1), Image.BILINEAR)
-        _ART[name] = base
-    base = _ART[name]
+        STATE.arts[name] = base
+    base = STATE.arts[name]
     prog = min(1.0, max(0.0, cx.t / max(8.0, it.get('drift', 30.0))))
     if it.get('dir', 1) > 0:
         ox = int((base.width - w) * (0.15 + 0.7 * prog) * it.get('dir', 1))
@@ -625,7 +683,6 @@ def it_shade(im, d, cx, it):
     im.alpha_composite(lay, (x0, y0))
 
 
-_ANIM_BOUND = [False]
 
 
 def it_anim(im, d, cx, it):
@@ -636,9 +693,9 @@ def it_anim(im, d, cx, it):
     if a <= 0:
         return
     import vp_anim
-    if not _ANIM_BOUND[0]:
-        vp_anim.bind(globals())
-        _ANIM_BOUND[0] = True
+    if not STATE.anim_bound[0]:
+        vp_anim.bind(STATE.as_dict())
+        STATE.anim_bound[0] = True
     vp_anim.DRAW[it['name']](im, d, cx, it, a)
 
 
@@ -651,7 +708,7 @@ ITEMS = dict(
 
 
 def opener(im, d, cx):
-    ch = SPEC['chapters'][cx.ci]
+    ch = STATE.spec['chapters'][cx.ci]
     un = ch.get('opener_until', 0)
     if cx.idx() >= un:
         return
@@ -669,19 +726,19 @@ def opener(im, d, cx):
 
 def render_scene(im, d, cx):
     opener(im, d, cx)
-    for it in SPEC['chapters'][cx.ci]['scene']:
+    for it in STATE.spec['chapters'][cx.ci]['scene']:
         ITEMS[it['t']](im, d, cx, it) if it['t'] != 'image' else it_image(im, d, cx, it)
         d = ImageDraw.Draw(im, 'RGBA')
 
 
 def header(d, ci):
-    if SPEC.get('style') == 'pop':
+    if STATE.spec.get('style') == 'pop':
         import vp_anim_pop as PP
-        PP.bind(globals())
+        PP.bind(STATE.as_dict())
         return PP.header(d, ci)
-    d.text((48, 16), SPEC['chapters'][ci].get('title', ''),
+    d.text((48, 16), STATE.spec['chapters'][ci].get('title', ''),
            font=FB[60], fill=WHITE, stroke_width=5, stroke_fill=(5, 10, 16))
-    d.text((48, 94), SPEC['header_sub'],
+    d.text((48, 94), STATE.spec['header_sub'],
            font=F[28], fill=(200, 210, 214), stroke_width=4, stroke_fill=(5, 10, 16))
 # ---------------------------------------------------------------- subtitles / frames
 def split_clauses(txt,maxc=42):
@@ -694,10 +751,9 @@ def split_clauses(txt,maxc=42):
         else:cur+=x
     if cur:out.append(cur)
     return out
-_SUBP={}
 def sub_lines(d, seg, f, t):
     k = seg['start']
-    if k not in _SUBP:
+    if k not in STATE.subp:
         txt = thin(display(seg['text']))
         ls = wrap(d, txt, f, 1720)
         ch = split_clauses(txt)
@@ -713,9 +769,9 @@ def sub_lines(d, seg, f, t):
                     cum += len(c)
                 fr.append(1.0)
                 ts = snap_bounds(seg, fr)
-            _SUBP[k] = [(wrap(d, c, f, 1720), ts[i], ts[i + 1]) for i, c in enumerate(ch)]
+            STATE.subp[k] = [(wrap(d, c, f, 1720), ts[i], ts[i + 1]) for i, c in enumerate(ch)]
         elif len(ls) <= 2:
-            _SUBP[k] = [(ls, seg['start'], seg['end'])]
+            STATE.subp[k] = [(ls, seg['start'], seg['end'])]
         else:
             allw = wrapn(d, txt, f, 1720)
             pages = [allw[i:i + 2] for i in range(0, len(allw), 2)]
@@ -726,18 +782,18 @@ def sub_lines(d, seg, f, t):
                 cum += len(''.join(p))
             fr.append(1.0)
             ts = snap_bounds(seg, fr)
-            _SUBP[k] = [(p, ts[i], ts[i + 1]) for i, p in enumerate(pages)]
-    for ls, s0, s1 in _SUBP[k]:
+            STATE.subp[k] = [(p, ts[i], ts[i + 1]) for i, p in enumerate(pages)]
+    for ls, s0, s1 in STATE.subp[k]:
         if t < s1:
             return ls
-    return _SUBP[k][-1][0]
+    return STATE.subp[k][-1][0]
 
 
 def _base_frame(ci, t, with_header=True):
     """字幕なしの 1 コマ（ヘッダー＋シーン＋章の見出し）。"""
-    if SPEC.get('style') == 'pop':
+    if STATE.spec.get('style') == 'pop':
         import vp_anim_pop as PP
-        PP.bind(globals())
+        PP.bind(STATE.as_dict())
         im = PP.background(ci, t)
     else:
         im = Image.new('RGBA', (1920, 1080), NAVY + (255,))
@@ -758,9 +814,9 @@ def _subs_layer(ci, t, alpha):
         return None
     lay = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0))
     d = ImageDraw.Draw(lay, 'RGBA')
-    if SPEC.get('style') == 'pop':
+    if STATE.spec.get('style') == 'pop':
         import vp_anim_pop as PP
-        PP.bind(globals())
+        PP.bind(STATE.as_dict())
         PP.subs_shade(lay)
         f = PP.heavy(66)
         lines = sub_lines(d, active, f, t)
@@ -779,13 +835,13 @@ def _subs_layer(ci, t, alpha):
 
 def render_frame(i):
     t = i / 30
-    ci = next(k for k, c in enumerate(TL) if t < c['end'] + 1e-9)
+    ci = next(k for k, c in enumerate(STATE.tl) if t < c['end'] + 1e-9)
     # 章の切れ目は、前の章と次の章を同時に描いて混ぜる（0.35 秒）。ハードカットの「飛び」を消す。
     b = None
-    if ci > 0 and t < TL[ci]['start'] + XFADE / 2:
-        b, A, B = TL[ci]['start'], ci - 1, ci
-    elif ci < len(TL) - 1 and t > TL[ci]['end'] - XFADE / 2:
-        b, A, B = TL[ci]['end'], ci, ci + 1
+    if ci > 0 and t < STATE.tl[ci]['start'] + XFADE / 2:
+        b, A, B = STATE.tl[ci]['start'], ci - 1, ci
+    elif ci < len(STATE.tl) - 1 and t > STATE.tl[ci]['end'] - XFADE / 2:
+        b, A, B = STATE.tl[ci]['end'], ci, ci + 1
     if b is None:
         im = _base_frame(ci, t)
         layers = ((ci, 1.0),)
@@ -800,15 +856,15 @@ def render_frame(i):
         if lay:
             im.alpha_composite(lay)
     d = ImageDraw.Draw(im)
-    yb = 1066 if SPEC.get('style') == 'pop' else 1012
-    d.rectangle((48, yb, 48 + 1824 * (i + 1) / N, yb + 6),
-                fill=(255, 226, 40) if SPEC.get('style') == 'pop' else (201, 173, 112))
+    yb = 1066 if STATE.spec.get('style') == 'pop' else 1012
+    d.rectangle((48, yb, 48 + 1824 * (i + 1) / STATE.n, yb + 6),
+                fill=(255, 226, 40) if STATE.spec.get('style') == 'pop' else (201, 173, 112))
     return im
 def render_part(a,b):
     stills=[int(x) for x in os.environ['STILLS'].split(',')] if os.environ.get('STILLS') else None
-    out = P(f'cache/{SLUG}_part_{a}_{b}.mp4')
+    out = P(f'cache/{STATE.slug}_part_{a}_{b}.mp4')
     P('logs').mkdir(exist_ok=True)
-    log = P(f'logs/{SLUG}_enc_{a}.log').open('wb')
+    log = P(f'logs/{STATE.slug}_enc_{a}.log').open('wb')
 
     class _P:
         class stdin:
@@ -831,11 +887,11 @@ def render_part(a,b):
                '-pix_fmt', 'yuv420p', str(out)]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log)
     try:
-        for i in (stills or range(a, min(b, N))):
+        for i in (stills or range(a, min(b, STATE.n))):
             im = render_frame(i)
             proc.stdin.write(im.convert('RGB').tobytes())
             if stills:
-                im.convert('RGB').save(P(f'cache/{SLUG}_still_{i}.png'))
+                im.convert('RGB').save(P(f'cache/{STATE.slug}_still_{i}.png'))
     finally:
         proc.stdin.close()
         proc.wait()
@@ -846,7 +902,7 @@ def stage_story():
     t = (theme_dir() / '09_script_v2.md').read_text(encoding='utf8')
     chs = re.split(r'\n## ', t)[1:]
     scenes = []
-    keys = [c['key'] for c in SPEC['chapters']]
+    keys = [c['key'] for c in STATE.spec['chapters']]
     for c in chs:
         head = c.split('\n')[0]
         m = re.match(r'章(\d+)　(.*)', head)
@@ -857,8 +913,8 @@ def stage_story():
                  for l in c.split('\n') if re.match(r'^\d+\. ', l)]
         scenes.append(dict(id=n - 1, key=keys[n - 1], title=m.group(2), narration=''.join(lines)))
     assert len(scenes) == len(keys), f'{len(scenes)} chapters in script vs {len(keys)} in spec'
-    P(f'data/{SLUG}_scenes.json').write_text(json.dumps(scenes, ensure_ascii=False, indent=1), encoding='utf8')
-    pr = P(f'data/{SLUG}_pronunciations.json')
+    P(f'data/{STATE.slug}_scenes.json').write_text(json.dumps(scenes, ensure_ascii=False, indent=1), encoding='utf8')
+    pr = P(f'data/{STATE.slug}_pronunciations.json')
     if not pr.exists():
         pr.write_text('{}', encoding='utf8')
     n = sum(len(s['narration']) for s in scenes)
@@ -881,20 +937,20 @@ def load_dic():
     c = P('data/pronunciations_common.json')
     if c.exists():
         d.update(json.loads(c.read_text(encoding='utf8')))
-    d.update(json.loads(P(f'data/{SLUG}_pronunciations.json').read_text(encoding='utf8')))
+    d.update(json.loads(P(f'data/{STATE.slug}_pronunciations.json').read_text(encoding='utf8')))
     return d
 def stage_kana():
     requests, style = _vv()
     dic = load_dic()
     out = []
-    for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
+    for s in json.loads(P(f'data/{STATE.slug}_scenes.json').read_text(encoding='utf8')):
         for x in sentences(s):
             sp_ = vv.apply_pron(x, dic)
             q = requests.post(BASE + '/audio_query', params={'text': sp_, 'speaker': style},
                               timeout=60).json()
             out.append(f"[{s['key']}] {x}\n    {q['kana']}")
-    P(f'out/{SLUG}_kana.txt').write_text('\n'.join(out), encoding='utf8')
-    print(len(out), 'sentences ->', f'out/{SLUG}_kana.txt')
+    P(f'out/{STATE.slug}_kana.txt').write_text('\n'.join(out), encoding='utf8')
+    print(len(out), 'sentences ->', f'out/{STATE.slug}_kana.txt')
 
 
 def readwav(p):
@@ -965,15 +1021,15 @@ def snap_bounds(seg,fr):
     return out
 def stage_audio():
     requests, style = _vv()
-    folder = P(f'cache/{SLUG}_audio')
+    folder = P(f'cache/{STATE.slug}_audio')
     folder.mkdir(exist_ok=True, parents=True)
-    voice = SPEC.get('voice', {})
+    voice = STATE.spec.get('voice', {})
     speed = float(voice.get('speed', SPEED))
     pre = float(voice.get('pre_phoneme', .15))
     post = float(voice.get('post_phoneme', .35))
     scene_hold = float(voice.get('scene_hold', 1.6))
     dic = load_dic()
-    scenes = json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8'))
+    scenes = json.loads(P(f'data/{STATE.slug}_scenes.json').read_text(encoding='utf8'))
     segs, timeline, cursor, allpcm, rate = [], [], 0, [], 24000
 
     for sc in scenes:
@@ -1020,7 +1076,7 @@ def stage_audio():
         allpcm.append(j)
         timeline.append({**sc, 'start': cursor, 'duration': sd, 'end': cursor + sd})
         cursor += sd
-    writewav(P(f'out/{SLUG}_narration.wav'), np.concatenate(allpcm), rate)
+    writewav(P(f'out/{STATE.slug}_narration.wav'), np.concatenate(allpcm), rate)
 
     cues, rep = [], []
     for x in segs:
@@ -1042,14 +1098,14 @@ def stage_audio():
         ))
         for i, c in enumerate(ch):
             cues.append((ts[i], ts[i + 1], c))
-    write_srt(P(f'out/{SLUG}_subtitles.srt'), cues)
-    P(f'out/{SLUG}_subtitle_timing.json').write_text(json.dumps(dict(
+    write_srt(P(f'out/{STATE.slug}_subtitles.srt'), cues)
+    P(f'out/{STATE.slug}_subtitle_timing.json').write_text(json.dumps(dict(
         tol=SNAP_TOL, min_cue=MIN_CUE,
         max_shift=max([r['max_shift'] for r in rep] or [0]),
         snapped=sum(r['snapped'] for r in rep), segments=rep,
     ), ensure_ascii=False, indent=1), encoding='utf8')
-    P(f'data/{SLUG}_timeline.json').write_text(json.dumps(timeline, ensure_ascii=False, indent=1), encoding='utf8')
-    P(f'out/{SLUG}_audio_report.json').write_text(json.dumps(dict(
+    P(f'data/{STATE.slug}_timeline.json').write_text(json.dumps(timeline, ensure_ascii=False, indent=1), encoding='utf8')
+    P(f'out/{STATE.slug}_audio_report.json').write_text(json.dumps(dict(
         engine=requests.get(BASE + '/version').json(),
         speaker=VOICE['label'], style=style,
         voice_tuning=dict(speed=speed, pre_phoneme=pre, post_phoneme=post, scene_hold=scene_hold),
@@ -1059,7 +1115,7 @@ def stage_audio():
 def stage_bgm():
     SR = 48000
     D = P(BGM['dir'])
-    tl = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
+    tl = json.loads(P(f'data/{STATE.slug}_timeline.json').read_text(encoding='utf8'))
     T = {c['key']: c for c in tl}
     TOTAL = tl[-1]['end']
     XF, TARGET = 3.0, -24.0
@@ -1086,7 +1142,7 @@ def stage_bgm():
     n_ = int(TOTAL * SR)
     mix = np.zeros((2, n_))
     cache = {}
-    for a, b, name in SPEC['bgm']:
+    for a, b, name in STATE.spec['bgm']:
         s, e = T[a]['start'], T[b]['end']
         s0, e0 = max(0, s - XF / 2), min(TOTAL, e + XF / 2)
         n = int((e0 - s0) * SR)
@@ -1109,7 +1165,7 @@ def stage_bgm():
     pk = np.abs(mix).max()
     if pk > .9:
         mix *= .9 / pk
-    with wave.open(str(P(f'out/{SLUG}_bgm.wav')), 'wb') as w:
+    with wave.open(str(P(f'out/{STATE.slug}_bgm.wav')), 'wb') as w:
         w.setnchannels(2)
         w.setsampwidth(2)
         w.setframerate(SR)
@@ -1145,17 +1201,17 @@ def _code_fp():
 def _part_fp(a, b, codefp):
     """フレーム a〜b の部品の指紋：該当する章（と前後の章）の定義、文の時刻、画像ファイル、全体の長さ、描画コード"""
     t0, t1 = a / 30 - 1.0, b / 30 + 1.0
-    cis = sorted({x for ci, c in enumerate(TL) if c['end'] >= t0 and c['start'] <= t1
-                  for x in (ci - 1, ci, ci + 1) if 0 <= x < len(TL)})
+    cis = sorted({x for ci, c in enumerate(STATE.tl) if c['end'] >= t0 and c['start'] <= t1
+                  for x in (ci - 1, ci, ci + 1) if 0 <= x < len(STATE.tl)})
     h = hashlib.sha1()
     imgs = {}
-    for k, m in (SPEC.get('images') or {}).items():
+    for k, m in (STATE.spec.get('images') or {}).items():
         f = P(m['file'])
         imgs[k] = [m, f.stat().st_size if f.exists() else -1,
                    f.stat().st_mtime_ns if f.exists() else -1]
-    h.update(json.dumps([SPEC.get('style'), imgs, N, codefp], sort_keys=True, ensure_ascii=False).encode())
+    h.update(json.dumps([STATE.spec.get('style'), imgs, STATE.n, codefp], sort_keys=True, ensure_ascii=False).encode())
     for ci in cis:
-        h.update(json.dumps([ci, SPEC['chapters'][ci], TL[ci], [x for x in SEGS if x['scene'] == ci]],
+        h.update(json.dumps([ci, STATE.spec['chapters'][ci], STATE.tl[ci], [x for x in STATE.segs if x['scene'] == ci]],
                             sort_keys=True, ensure_ascii=False).encode())
     return h.hexdigest()
 def stage_build(chunk=1000, bgm_db=-6.0):
@@ -1165,11 +1221,11 @@ def stage_build(chunk=1000, bgm_db=-6.0):
     full = os.environ.get('VP_FULL') == '1'
     import time as _t
     codefp = _code_fp()
-    fps = {a: _part_fp(a, min(a + chunk, N), codefp) for a in range(0, N, chunk)}
+    fps = {a: _part_fp(a, min(a + chunk, STATE.n), codefp) for a in range(0, STATE.n, chunk)}
     pending, reused = [], 0
-    for a in range(0, N, chunk):
-        mp = P(f'cache/{SLUG}_part_{a}_{a + chunk}.mp4')
-        fpf = P(f'cache/{SLUG}_part_{a}_{a + chunk}.fp')
+    for a in range(0, STATE.n, chunk):
+        mp = P(f'cache/{STATE.slug}_part_{a}_{a + chunk}.mp4')
+        fpf = P(f'cache/{STATE.slug}_part_{a}_{a + chunk}.fp')
         ok = mp.exists() and mp.stat().st_size > 0
         # 変わっていない部品は、作り直さない
         if ok and (keep_parts or (not full and fpf.exists() and fpf.read_text(encoding='utf8') == fps[a])):
@@ -1180,24 +1236,24 @@ def stage_build(chunk=1000, bgm_db=-6.0):
         if fpf.exists():
             fpf.unlink()
         pending.append(a)
-    want = {f'{SLUG}_part_{a}_{a + chunk}' for a in range(0, N, chunk)}
+    want = {f'{STATE.slug}_part_{a}_{a + chunk}' for a in range(0, STATE.n, chunk)}
     # 部品の長さが違う古い部品は、結合に混ざらないよう消す
-    for f in list(P('cache').glob(f'{SLUG}_part_*.mp4')) + list(P('cache').glob(f'{SLUG}_part_*.fp')):
+    for f in list(P('cache').glob(f'{STATE.slug}_part_*.mp4')) + list(P('cache').glob(f'{STATE.slug}_part_*.fp')):
         if f.stem not in want:
             f.unlink()
     print(f'parts: {len(fps)} (reuse {reused}, render {len(pending)})', flush=True)
     from ytcore import vp_lock
     # 別の build が動いていれば、並列数を分け合う
-    maxpar = int(os.environ['VP_MAXPAR']) if os.environ.get('VP_MAXPAR') else vp_lock.share_maxpar(ROOT, SLUG)
+    maxpar = int(os.environ['VP_MAXPAR']) if os.environ.get('VP_MAXPAR') else vp_lock.share_maxpar(ROOT, STATE.slug)
     running, rc, tries, why = [], [], {}, []
     TRANSIENT = ('Could not open encoder', 'OpenEncodeSessionEx', 'No capable devices',
                  'NVENC', 'nvenc', 'CUDA_ERROR', 'out of memory')
     while pending or running:   # NVENC の同時セッションは8本まで（14本同時だと、Could not open encoder で落ちる）
         while pending and not why and len(running) < maxpar:
             a = pending.pop(0)
-            ef = P(f'cache/{SLUG}_part_{a}.err')
+            ef = P(f'cache/{STATE.slug}_part_{a}.err')
             fh = open(ef, 'w', encoding='utf8')
-            cmd = [sys.executable, '-m', 'ytcore.vp', SLUG, 'part', str(a), str(a + chunk)]
+            cmd = [sys.executable, '-m', 'ytcore.vp', STATE.slug, 'part', str(a), str(a + chunk)]
             running.append((a, subprocess.Popen(cmd, cwd=str(ROOT),
                                                 env={**os.environ, 'PYTHONIOENCODING': 'utf8'}, stderr=fh), fh, ef))
         _t.sleep(1)
@@ -1209,7 +1265,7 @@ def stage_build(chunk=1000, bgm_db=-6.0):
                 continue   # すでに止めると決めたあと（kill された部品）は数えない
             if q_[1].returncode == 0:
                 rc.append(0)
-                P(f'cache/{SLUG}_part_{q_[0]}_{q_[0] + chunk}.fp').write_text(fps[q_[0]], encoding='utf8')
+                P(f'cache/{STATE.slug}_part_{q_[0]}_{q_[0] + chunk}.fp').write_text(fps[q_[0]], encoding='utf8')
                 continue
             transient = any(t in err for t in TRANSIENT)
             if transient and tries.get(q_[0], 0) < 2:   # GPUの一時失敗だけ、少し待って部品ごとにやり直す
@@ -1224,25 +1280,25 @@ def stage_build(chunk=1000, bgm_db=-6.0):
                 for r_ in running:
                     r_[1].kill()
                 pending.clear()
-    for f_ in P('cache').glob(f'{SLUG}_part_*.err'):
+    for f_ in P('cache').glob(f'{STATE.slug}_part_*.err'):
         f_.unlink(missing_ok=True)
     if why:
         raise AssertionError('part render failed (not retried: deterministic error) ' + '; '.join(why))
     assert all(r == 0 for r in rc), f'part render failed {rc}'
-    parts = [P(f'cache/{SLUG}_part_{a}_{a + chunk}.mp4') for a in range(0, N, chunk)]
+    parts = [P(f'cache/{STATE.slug}_part_{a}_{a + chunk}.mp4') for a in range(0, STATE.n, chunk)]
     miss = [p.name for p in parts if not p.exists() or p.stat().st_size == 0]
     assert not miss, f'部品が足りない: {miss}'
-    lst = P(f'cache/{SLUG}_parts.txt')
+    lst = P(f'cache/{STATE.slug}_parts.txt')
     lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts))
-    wav = P(f'out/{SLUG}_narration.wav')
-    nob = P(f'out/{SLUG}_video_nobgm.mp4')
+    wav = P(f'out/{STATE.slug}_narration.wav')
+    nob = P(f'out/{STATE.slug}_video_nobgm.mp4')
     af, j = loud_args(wav)
     subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-f', 'concat', '-safe', '0', '-i', str(lst),
                     '-i', str(wav), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', af,
                     '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart',
                     '-shortest', str(nob)], check=True)
-    mix = P(f'cache/{SLUG}_mix.wav')
-    bgm = P(f'out/{SLUG}_bgm.wav')
+    mix = P(f'cache/{STATE.slug}_mix.wav')
+    bgm = P(f'out/{STATE.slug}_bgm.wav')
     fc = (f'[0:a]aresample=48000,pan=stereo|c0=c0|c1=c0,asplit=2[n1][n2];'
           f'[1:a]volume={bgm_db}dB[bg];'
           f'[bg][n2]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=900:makeup=1[duck];'
@@ -1250,16 +1306,16 @@ def stage_build(chunk=1000, bgm_db=-6.0):
     subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-i', str(wav), '-i', str(bgm),
                     '-filter_complex', fc, '-map', '[m]', '-c:a', 'pcm_s16le', str(mix)], check=True)
     af2, j2 = loud_args(mix)
-    out = P(f'out/{SLUG}_video.mp4')
+    out = P(f'out/{STATE.slug}_video.mp4')
     subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-i', str(nob), '-i', str(mix),
                     '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', af2, '-c:a', 'aac',
                     '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', '-shortest', str(out)],
                    check=True)
     # 焼き込んだ字幕の指紋を残す（あとで「字幕だけ直して焼き直していない」を中身で判定するため）
-    srt=P(f'out/{SLUG}_subtitles.srt')
+    srt=P(f'out/{STATE.slug}_subtitles.srt')
     if srt.exists():
         import hashlib,datetime as _dt
-        P(f'out/{SLUG}_build.json').write_text(json.dumps({
+        P(f'out/{STATE.slug}_build.json').write_text(json.dumps({
             'srt_sha256': hashlib.sha256(srt.read_bytes()).hexdigest(),
             'srt_mtime': srt.stat().st_mtime,
             'video_mtime': out.stat().st_mtime,
@@ -1268,24 +1324,24 @@ def stage_build(chunk=1000, bgm_db=-6.0):
     stage_qa()
 def stage_qa():
     load_runtime()
-    v = P(f'out/{SLUG}_video.mp4')
+    v = P(f'out/{STATE.slug}_video.mp4')
     r = subprocess.run([_ffprobe(), '-v', 'error', '-show_entries', 'format=duration',
                         '-of', 'csv=p=0', str(v)], capture_output=True, text=True)
     dur = float(r.stdout.strip())
-    assert abs(dur - TL[-1]['end']) < 1.0, f'video {dur:.2f}s != timeline {TL[-1]["end"]:.2f}s'
+    assert abs(dur - STATE.tl[-1]['end']) < 1.0, f'video {dur:.2f}s != timeline {STATE.tl[-1]["end"]:.2f}s'
     dec = subprocess.run([_ffmpeg(), '-v', 'error', '-i', str(v), '-f', 'null', '-'],
                          capture_output=True, text=True)
     assert not dec.stderr.strip(), dec.stderr[:300]
     lufs, _ = yloud.measure_ebur128(v, ffmpeg=_ffmpeg())
     blk = [(a, a + d) for a, d in yqa.black_spans(v, ffmpeg=_ffmpeg())]
     lt = f'{lufs:.1f}' if lufs is not None else 'N/A'
-    print(f'QA {SLUG}: {dur:.1f}s decode ok  {lt} LUFS  black segments {blk}')
+    print(f'QA {STATE.slug}: {dur:.1f}s decode ok  {lt} LUFS  black segments {blk}')
     # contact sheet: first sentence of every chapter + the last-but-one sentence
     pts = []
-    for c in TL:
-        ss = [x for x in SEGS if x['scene'] == c['id']]
+    for c in STATE.tl:
+        ss = [x for x in STATE.segs if x['scene'] == c['id']]
         pts += [ss[0]['start'] + 1.0, ss[len(ss) // 2]['start'] + 1.0, ss[-1]['start'] + 1.0]
-    d = P(f'out/{SLUG}_review')
+    d = P(f'out/{STATE.slug}_review')
     d.mkdir(exist_ok=True, parents=True)
     for k, t in enumerate(pts):
         subprocess.run([_ffmpeg(), '-v', 'error', '-y', '-ss', f'{t:.2f}', '-i', str(v),
@@ -1310,10 +1366,10 @@ def stage_qa():
 
 
 def chapter_list():
-    tl = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
+    tl = json.loads(P(f'data/{STATE.slug}_timeline.json').read_text(encoding='utf8'))
     ts = lambda s: f'{int(s) // 60}:{int(s) % 60:02d}'
     chapters = [f'{ts(c["start"])} '
-                f'{SPEC["chapters"][i].get("chapter_title", SPEC["chapters"][i].get("title", c["key"]))}'
+                f'{STATE.spec["chapters"][i].get("chapter_title", STATE.spec["chapters"][i].get("title", c["key"]))}'
                 for i, c in enumerate(tl)]
     return chapters, tl[-1]['end']
 class _Maou(dict):
@@ -1322,12 +1378,12 @@ class _Maou(dict):
         m=re.match(r'([a-z]+)(\d+)$',k);return s._JP.get(m.group(1),m.group(1))+m.group(2)
 MAOU=_Maou()
 def stage_desc():
-    ds = SPEC['desc']
+    ds = STATE.spec['desc']
     chapters, dur = chapter_list()
-    used = sorted({it['name'] for ch in SPEC['chapters'] for it in ch['scene'] if it['t'] == 'image'})
-    imglines = [f"・{SPEC['images'][n]['credit']}:{SPEC['images'][n]['source_url']}"
-                for n in used if SPEC['images'][n].get('credit')]
-    tracks = ' / '.join(MAOU[x] for x in dict.fromkeys(b[2] for b in SPEC['bgm']))
+    used = sorted({it['name'] for ch in STATE.spec['chapters'] for it in ch['scene'] if it['t'] == 'image'})
+    imglines = [f"・{STATE.spec['images'][n]['credit']}:{STATE.spec['images'][n]['source_url']}"
+                for n in used if STATE.spec['images'][n].get('credit')]
+    tracks = ' / '.join(MAOU[x] for x in dict.fromkeys(b[2] for b in STATE.spec['bgm']))
 
     L = [f'# YouTube 投稿用ドラフト：{ds["title_main"]}\n', '## タイトル案']
     L += [f'{i + 1}. {t}' for i, t in enumerate(ds['titles'])]
@@ -1351,14 +1407,14 @@ def stage_desc():
         '- [ ] **動画を通しで見る・聞く**(動き、ナレーションの読み、BGMの音量、画像の切り出しと説明の整合)',
         '- [ ] 概要欄の外部リンクに必要な機能利用資格をStudioで確認し、公開後にリンクが開けるか確認する',
         f'- [ ] {CH["terms_check"]}',
-        f'- [ ] 字幕:`out/{SLUG}_subtitles.srt` をアップロード(日本語)',
+        f'- [ ] 字幕:`out/{STATE.slug}_subtitles.srt` をアップロード(日本語)',
         '- [ ] サムネイルを設定し、投稿後の表示(スマートフォンの小さな表示)を確認',
         '',
     ]
-    P(f'out/{SLUG}_description.md').write_text('\n'.join(L) + '\n', encoding='utf8')
+    P(f'out/{STATE.slug}_description.md').write_text('\n'.join(L) + '\n', encoding='utf8')
     print('\n'.join(chapters), '\nduration', f'{int(dur // 60)}分{int(dur % 60)}秒')
 def stage_thumb():
-    th = SPEC['thumb']
+    th = STATE.spec['thumb']
     W, H = 1280, 720
     FDW = FONTS['dir']
 
@@ -1389,7 +1445,7 @@ def stage_thumb():
         im.alpha_composite(sh)
     else:
         im = Image.new('RGBA', (W, H), NAVY + (255,))
-        meta = SPEC['images'][th['image']]
+        meta = STATE.spec['images'][th['image']]
         pic = Image.open(P(meta['file'])).convert('RGB')
         c = th.get('crop') or meta.get('crop')
         if c:
@@ -1416,21 +1472,21 @@ def stage_thumb():
     by = th.get('bar_y', 520)
     d.rectangle((54, by, th.get('bar_w', 640), by + 12), fill=tuple(th.get('bar_col', RED)))
     st(d, (50, by + 35), th['sub'], font(th.get('sub_size', 38)), WHITE, 6)
-    out = P(f'out/{SLUG}_thumbnail.jpg')
+    out = P(f'out/{STATE.slug}_thumbnail.jpg')
     im.convert('RGB').save(out, quality=92)
     print(out, round(out.stat().st_size / 1e3), 'KB')
 
 
 def stage_pack():
     import make_upload_pack as M
-    vid = P(f'out/{SLUG}_video.mp4')
-    srt = P(f'out/{SLUG}_subtitles.srt')
+    vid = P(f'out/{STATE.slug}_video.mp4')
+    srt = P(f'out/{STATE.slug}_subtitles.srt')
     assert vid.stat().st_mtime >= srt.stat().st_mtime - 1, \
         f'{vid.name} is older than the subtitles (stale build?) - rebuild before pack'
-    name = SPEC['pack']
-    M.build(name, dict(video=f'out/{SLUG}_video.mp4', thumb=f'out/{SLUG}_thumbnail.jpg',
-                       srt=f'out/{SLUG}_subtitles.srt', desc=f'out/{SLUG}_description.md',
-                       title_no=SPEC['desc'].get('title_no', 1)))
+    name = STATE.spec['pack']
+    M.build(name, dict(video=f'out/{STATE.slug}_video.mp4', thumb=f'out/{STATE.slug}_thumbnail.jpg',
+                       srt=f'out/{STATE.slug}_subtitles.srt', desc=f'out/{STATE.slug}_description.md',
+                       title_no=STATE.spec['desc'].get('title_no', 1)))
 # ---------------------------------------------------------------- CLI
 def _cmd_part(args):
     load_runtime()
@@ -1439,7 +1495,7 @@ def _cmd_part(args):
 
 def _cmd_still(args):
     load_runtime()
-    d = P(f'out/{SLUG}_review')
+    d = P(f'out/{STATE.slug}_review')
     d.mkdir(parents=True, exist_ok=True)
     for a in args:
         render_frame(int(float(a) * 30)).convert('RGB').save(d / f'still_{a}.png')
@@ -1448,46 +1504,46 @@ def _cmd_still(args):
 
 def _cmd_ends(args):
     load_runtime()
-    for c in TL:
-        ss = [x for x in SEGS if x['scene'] == c['id']]
+    for c in STATE.tl:
+        ss = [x for x in STATE.segs if x['scene'] == c['id']]
         print(c['key'], [round(x['start'] + 0.8, 1) for x in ss])
 
 
 def _cmd_lint(args):
     from ytcore import script_lint
-    raise SystemExit(script_lint.run(globals()))
+    raise SystemExit(script_lint.run(STATE.as_dict()))
 
 
 def _cmd_prep(args):
     """台本→読み→音声→BGM→検査まで一括（描画の前の準備。止まる所があれば、そこで止まる）。"""
     from ytcore import vp_check, script_lint
     stage_story()
-    script_lint.run(globals())
+    script_lint.run(STATE.as_dict())
     stage_kana()
     stage_audio()
     stage_bgm()
-    raise SystemExit(vp_check.run(globals()))
+    raise SystemExit(vp_check.run(STATE.as_dict()))
 
 
 def _cmd_preview(args):
     load_runtime()
     from ytcore import vp_preview
-    raise SystemExit(vp_preview.run(globals()))
+    raise SystemExit(vp_preview.run(STATE.as_dict()))
 
 
 def _cmd_pvpart(args):
     load_runtime()
     from ytcore import vp_preview
-    vp_preview.worker(globals(), args[0])
+    vp_preview.worker(STATE.as_dict(), args[0])
 
 
 def _cmd_check(args):
     from ytcore import vp_check
-    raise SystemExit(vp_check.run(globals()))
+    raise SystemExit(vp_check.run(STATE.as_dict()))
 
 
 def _cmd_sents(args):
-    for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
+    for s in json.loads(P(f'data/{STATE.slug}_scenes.json').read_text(encoding='utf8')):
         print(f"--- {s['id']} {s['key']}")
         for i, x in enumerate(sentences(s)):
             print(f'  {i}: {x[:60]}')
@@ -1499,10 +1555,10 @@ def _cmd_refp(args):
     ch = int(os.environ.get('VP_CHUNK', 1000))
     cf = _code_fp()
     n_ = 0
-    for a in range(0, N, ch):
-        mp = P(f'cache/{SLUG}_part_{a}_{a+ch}.mp4')
+    for a in range(0, STATE.n, ch):
+        mp = P(f'cache/{STATE.slug}_part_{a}_{a+ch}.mp4')
         if mp.exists() and mp.stat().st_size > 0:
-            P(f'cache/{SLUG}_part_{a}_{a+ch}.fp').write_text(_part_fp(a, min(a + ch, N), cf), encoding='utf8')
+            P(f'cache/{STATE.slug}_part_{a}_{a+ch}.fp').write_text(_part_fp(a, min(a + ch, STATE.n), cf), encoding='utf8')
             n_ += 1
     print('re-stamped', n_, 'parts')
 
