@@ -25,7 +25,7 @@ topics = ["戦国時代", "雑学"]   # discover 用。search.list は quota を
 feed_limit = 15       # feed で見る直近の本数（既定 15）
 ```
 
-`python -m ytkit.youtube research` は `out/youtube_research.md` / `.json` に再生数・エンゲージ付きの比較表を出す。キーが無いときは `python -m ytkit.youtube feed` で `out/youtube_research_rss.md` / `.json` に RSS 由来の比較表（再生数・エンゲージは `-`）を出す。`python -m ytkit.youtube discover` はキーワードからチャンネル候補を表示する。タイトルやサムネイルを丸写しせず、投稿のパターンを比較するための部品です。
+`python -m ytkit.youtube research` は `out/youtube_research.md` / `.json` に再生数・エンゲージ付きの比較表を出す。キーが無いときは `python -m ytkit.youtube feed` で `out/youtube_research_rss.md` / `.json` に RSS 由来の比較表（再生数・エンゲージは `-`）を出す。`python -m ytkit.youtube discover` はキーワードからチャンネル候補を表示する。タイトルは長さとハッシュタグの集計だけに使い、パターンの比較に留める部品です。
 
 ## ytcore（動画制作のコア。2026-11-22 に取り込み）
 `ytkit` が土台の部品なのに対し、`ytcore` は動画の描画そのもの。履歴は `git filter-repo` で保って取り込んだ(`git log -- ytcore/make_short2.py` で元の履歴が辿れる)。
@@ -71,7 +71,7 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 - 履歴を書き換えない(公開済みのため)。メールアドレスは GitHub の noreply アドレスにしてある。
 
 ## 環境変数
-`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）、`YOUTUBE_API_KEY`（YouTube リサーチ用）。ytcore の各パイプラインもこれらの環境変数を `ytkit` 経由で読みます。
+`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_URL`（既定 `http://127.0.0.1:8188`）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）、`YOUTUBE_API_KEY`（YouTube リサーチ用）。ytcore の各パイプラインも、これらの環境変数を `ytkit` 経由で呼び出し時に読みます。
 
 ## 方針
 長尺 `vp`、Short 描画 `make_short` / `make_short2`、`hn_text`、`rich_text` などの描画コアは、すでにここへ移行済みです。モジュール名は変えず、プロジェクト側の `scripts/<名前>.py` を薄い入口にして呼びます。

@@ -92,6 +92,7 @@ def test_rich_text_splits_numbers_from_surrounding_text():
     assert rich_text.runs('約21時間（1,250分）') == [
         ('約', False), ('21時間', True), ('（', False), ('1,250分', True), ('）', False)]
     assert rich_text.runs('abc2026年x') == [('abc', False), ('2026年', True), ('x', False)]
+    assert rich_text.runs('1,250.5キロ') == [('1,250.5キロ', True)]
 
 
 # ---- 字幕の境界・場面の表示判定
