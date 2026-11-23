@@ -14,12 +14,20 @@ DEFAULT_BASE = 'http://127.0.0.1:8188'
 DEFAULT_OUTPUT_ROOT = Path(os.environ.get('FREEVIDEO_OUTPUT_ROOT', 'output'))
 
 
-def get(path, base=DEFAULT_BASE, timeout=30):
-    return json.loads(urllib.request.urlopen(base + path, timeout=timeout).read())
+def _base(base):
+    return base or os.environ.get('FREEVIDEO_URL') or DEFAULT_BASE
 
 
-def post(path, body, base=DEFAULT_BASE, timeout=60):
-    req = urllib.request.Request(base + path, data=json.dumps(body).encode(),
+def _output_root(output_root):
+    return Path(output_root or os.environ.get('FREEVIDEO_OUTPUT_ROOT') or DEFAULT_OUTPUT_ROOT)
+
+
+def get(path, base=None, timeout=30):
+    return json.loads(urllib.request.urlopen(_base(base) + path, timeout=timeout).read())
+
+
+def post(path, body, base=None, timeout=60):
+    req = urllib.request.Request(_base(base) + path, data=json.dumps(body).encode(),
                                  headers={'Content-Type': 'application/json'})
     raw = urllib.request.urlopen(req, timeout=timeout).read()
     return json.loads(raw) if raw.strip() else {}
@@ -41,13 +49,13 @@ def graph(text, width, height, seconds, seed=None):
     }
 
 
-def queue_state(base=DEFAULT_BASE):
+def queue_state(base=None):
     """(実行中の数, 待ちの数)"""
     q = get('/queue', base)
     return len(q['queue_running']), len(q['queue_pending'])
 
 
-def wait(pid, base=DEFAULT_BASE, limit=3600, poll=15):
+def wait(pid, base=None, limit=3600, poll=15):
     """完了まで待つ。(history の entry, status_str)。サーバーが落ちたら (None, 'server_down')。"""
     t0 = time.time()
     while time.time() - t0 < limit:
@@ -65,10 +73,11 @@ def wait(pid, base=DEFAULT_BASE, limit=3600, poll=15):
     return None, 'timeout'
 
 
-def video_of(entry, output_root=DEFAULT_OUTPUT_ROOT):
+def video_of(entry, output_root=None):
     """完了した entry から出力 mp4 のパスを返す。無ければ None。"""
+    root = _output_root(output_root)
     for node in entry.get('outputs', {}).values():
         for item in node.get('images', []):
             if str(item.get('filename', '')).endswith('.mp4'):
-                return Path(output_root) / item.get('subfolder', '') / item['filename']
+                return root / item.get('subfolder', '') / item['filename']
     return None

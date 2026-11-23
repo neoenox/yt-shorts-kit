@@ -201,11 +201,24 @@ def test_speaker_with_no_styles_raises_named_error(monkeypatch):
 
 
 def test_freevideo_output_root_comes_from_env(monkeypatch):
+    """出力ルートは import 時ではなく呼び出し時に解決する。"""
     monkeypatch.setenv('FREEVIDEO_OUTPUT_ROOT', 'E:/other/output')
-    import importlib
-    fv = importlib.reload(freevideo)
-    try:
-        assert fv.DEFAULT_OUTPUT_ROOT == Path('E:/other/output')
-    finally:
-        monkeypatch.delenv('FREEVIDEO_OUTPUT_ROOT')
-        importlib.reload(freevideo)
+    entry = {'outputs': {'1': {'images': [{'filename': 'v.mp4'}]}}}
+    assert freevideo.video_of(entry) == Path('E:/other/output/v.mp4')
+    # 呼び出し時に上書きできる（旧来の引数もそのまま効く）
+    assert freevideo.video_of(entry, 'E:/explicit') == Path('E:/explicit/v.mp4')
+
+
+def test_freevideo_base_url_comes_from_env(monkeypatch):
+    """サーバー URL も import 時ではなく呼び出し時に解決する。"""
+    seen = []
+    monkeypatch.setenv('FREEVIDEO_URL', 'http://example:9')
+    monkeypatch.setattr(freevideo.urllib.request, 'urlopen',
+                        lambda url, timeout: seen.append(url) or _Bytes(b'{}'))
+    freevideo.get('/queue')
+    assert seen == ['http://example:9/queue']
+
+
+class _Bytes(bytes):
+    def read(self):
+        return self
