@@ -42,7 +42,22 @@ def alive(pid):
 
 def _read(path):
     try:
-        text = Path(path).read_text(encoding='utf8').lstrip('\\0')
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            if os.name == 'nt':
+                try:
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    first = os.read(fd, 1)
+                    os.lseek(fd, 1 if first == b'\\0' else 0, os.SEEK_SET)
+                except OSError:
+                    # The locked byte may be unreadable while another process
+                    # holds it; metadata is deliberately stored after byte 0.
+                    os.lseek(fd, 1, os.SEEK_SET)
+            else:
+                os.lseek(fd, 0, os.SEEK_SET)
+            text = os.read(fd, 4096).decode('utf8').lstrip('\\0')
+        finally:
+            os.close(fd)
         pid, _, cmd = text.partition(' ')
         return int(pid), cmd.strip()
     except Exception:
@@ -93,11 +108,18 @@ def acquire(root, slug, cmd):
         )
 
     metadata = f'{os.getpid()} {cmd} {time.strftime("%H:%M:%S")}'.encode('utf8')
-    os.lseek(fd, 0, os.SEEK_SET)
-    os.write(fd, metadata)
-    # Never truncate the lock file to zero while holding the Windows byte lock:
-    # doing so can invalidate the locked byte and allow a second contender.
-    os.ftruncate(fd, len(metadata))
+    if os.name == 'nt':
+        # Byte 0 is the lock region. Keep it present and place diagnostics
+        # after it so another process can read metadata while byte 0 is locked.
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, b'\\0')
+        os.lseek(fd, 1, os.SEEK_SET)
+        os.write(fd, metadata)
+        os.ftruncate(fd, 1 + len(metadata))
+    else:
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(fd, metadata)
+        os.ftruncate(fd, len(metadata))
     os.fsync(fd)
 
     def release():
