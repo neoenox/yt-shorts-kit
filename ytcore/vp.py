@@ -688,66 +688,115 @@ def split_clauses(txt,maxc=42):
     if cur:out.append(cur)
     return out
 _SUBP={}
-def sub_lines(d,seg,f,t):
-    k=seg['start']
+def sub_lines(d, seg, f, t):
+    k = seg['start']
     if k not in _SUBP:
-        txt=thin(display(seg['text']));ls=wrap(d,txt,f,1720);ch=split_clauses(txt);ct=seg.get('cue_times')
-        if len(ch)>1:
-            if ct and len(ct)==len(ch)+1:ts=ct
+        txt = thin(display(seg['text']))
+        ls = wrap(d, txt, f, 1720)
+        ch = split_clauses(txt)
+        ct = seg.get('cue_times')
+        if len(ch) > 1:
+            if ct and len(ct) == len(ch) + 1:
+                ts = ct
             else:
-                tot=sum(len(c) for c in ch);cum=0;fr=[]
-                for c in ch:fr.append(cum/tot);cum+=len(c)
-                fr.append(1.0);ts=snap_bounds(seg,fr)
-            _SUBP[k]=[(wrap(d,c,f,1720),ts[i],ts[i+1]) for i,c in enumerate(ch)]
-        elif len(ls)<=2:_SUBP[k]=[(ls,seg['start'],seg['end'])]
+                tot = sum(len(c) for c in ch)
+                cum, fr = 0, []
+                for c in ch:
+                    fr.append(cum / tot)
+                    cum += len(c)
+                fr.append(1.0)
+                ts = snap_bounds(seg, fr)
+            _SUBP[k] = [(wrap(d, c, f, 1720), ts[i], ts[i + 1]) for i, c in enumerate(ch)]
+        elif len(ls) <= 2:
+            _SUBP[k] = [(ls, seg['start'], seg['end'])]
         else:
-            allw=wrapn(d,txt,f,1720);pages=[allw[i:i+2] for i in range(0,len(allw),2)];tot=sum(len(''.join(p)) for p in pages);cum=0;fr=[]
-            for p in pages:fr.append(cum/tot);cum+=len(''.join(p))
-            fr.append(1.0);ts=snap_bounds(seg,fr)
-            _SUBP[k]=[(p,ts[i],ts[i+1]) for i,p in enumerate(pages)]
-    for ls,s0,s1 in _SUBP[k]:
-        if t<s1:return ls
+            allw = wrapn(d, txt, f, 1720)
+            pages = [allw[i:i + 2] for i in range(0, len(allw), 2)]
+            tot = sum(len(''.join(p)) for p in pages)
+            cum, fr = 0, []
+            for p in pages:
+                fr.append(cum / tot)
+                cum += len(''.join(p))
+            fr.append(1.0)
+            ts = snap_bounds(seg, fr)
+            _SUBP[k] = [(p, ts[i], ts[i + 1]) for i, p in enumerate(pages)]
+    for ls, s0, s1 in _SUBP[k]:
+        if t < s1:
+            return ls
     return _SUBP[k][-1][0]
-def _base_frame(ci,t,with_header=True):
+
+
+def _base_frame(ci, t, with_header=True):
     """字幕なしの 1 コマ（ヘッダー＋シーン＋章の見出し）。"""
-    if SPEC.get('style')=='pop':
-        import vp_anim_pop as PP;PP.bind(globals());im=PP.background(ci,t)
-    else:im=Image.new('RGBA',(1920,1080),NAVY+(255,))
-    d=ImageDraw.Draw(im,'RGBA')
-    if with_header:header(d,ci)
-    render_scene(im,d,Ctx(ci,t));return im
-def _subs_layer(ci,t,alpha):
+    if SPEC.get('style') == 'pop':
+        import vp_anim_pop as PP
+        PP.bind(globals())
+        im = PP.background(ci, t)
+    else:
+        im = Image.new('RGBA', (1920, 1080), NAVY + (255,))
+    d = ImageDraw.Draw(im, 'RGBA')
+    if with_header:
+        header(d, ci)
+    render_scene(im, d, Ctx(ci, t))
+    return im
+
+
+def _subs_layer(ci, t, alpha):
     """字幕だけの透明レイヤー。章の切れ目では alpha でフェードさせる。"""
-    if alpha<=0:return None
-    cx=Ctx(ci,t);active=next((x for x in cx.segl if x['start']<=t<x['end']),None)
-    if not active:return None
-    lay=Image.new('RGBA',(1920,1080),(0,0,0,0));d=ImageDraw.Draw(lay,'RGBA')
-    if SPEC.get('style')=='pop':
-        import vp_anim_pop as PP;PP.bind(globals());PP.subs_shade(lay);f=PP.heavy(66);lines=sub_lines(d,active,f,t);PP.subs(d,lines,f,rich)
+    if alpha <= 0:
+        return None
+    cx = Ctx(ci, t)
+    active = next((x for x in cx.segl if x['start'] <= t < x['end']), None)
+    if not active:
+        return None
+    lay = Image.new('RGBA', (1920, 1080), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay, 'RGBA')
+    if SPEC.get('style') == 'pop':
+        import vp_anim_pop as PP
+        PP.bind(globals())
+        PP.subs_shade(lay)
+        f = PP.heavy(66)
+        lines = sub_lines(d, active, f, t)
+        PP.subs(d, lines, f, rich)
     else:
-      f=FSUB[52];lines=sub_lines(d,active,f,t);d.rounded_rectangle((60,850,1860,1008),12,fill=(5,18,29,242))
-      for j,txt in enumerate(lines):
-        assert tw(d,txt,f)<1760
-        rich.draw_center(d,960,862+j*70,txt,f,'#fffcef',(255,208,122))
-    if alpha<1:lay.putalpha(lay.getchannel('A').point(lambda v:int(v*alpha)))
+        f = FSUB[52]
+        lines = sub_lines(d, active, f, t)
+        d.rounded_rectangle((60, 850, 1860, 1008), 12, fill=(5, 18, 29, 242))
+        for j, txt in enumerate(lines):
+            assert tw(d, txt, f) < 1760
+            rich.draw_center(d, 960, 862 + j * 70, txt, f, '#fffcef', (255, 208, 122))
+    if alpha < 1:
+        lay.putalpha(lay.getchannel('A').point(lambda v: int(v * alpha)))
     return lay
+
+
 def render_frame(i):
-    t=i/30;ci=next(k for k,c in enumerate(TL) if t<c['end']+1e-9)
+    t = i / 30
+    ci = next(k for k, c in enumerate(TL) if t < c['end'] + 1e-9)
     # 章の切れ目は、前の章と次の章を同時に描いて混ぜる（0.35 秒）。ハードカットの「飛び」を消す。
-    b=None
-    if ci>0 and t<TL[ci]['start']+XFADE/2:b,A,B=TL[ci]['start'],ci-1,ci
-    elif ci<len(TL)-1 and t>TL[ci]['end']-XFADE/2:b,A,B=TL[ci]['end'],ci,ci+1
+    b = None
+    if ci > 0 and t < TL[ci]['start'] + XFADE / 2:
+        b, A, B = TL[ci]['start'], ci - 1, ci
+    elif ci < len(TL) - 1 and t > TL[ci]['end'] - XFADE / 2:
+        b, A, B = TL[ci]['end'], ci, ci + 1
     if b is None:
-        im=_base_frame(ci,t);layers=((ci,1.0),)
+        im = _base_frame(ci, t)
+        layers = ((ci, 1.0),)
     else:
-        w=min(1.0,max(0.0,(t-(b-XFADE/2))/XFADE))
-        im=Image.blend(_base_frame(A,t,False),_base_frame(B,t,False),w)
+        w = min(1.0, max(0.0, (t - (b - XFADE / 2)) / XFADE))
+        im = Image.blend(_base_frame(A, t, False), _base_frame(B, t, False), w)
         # 見出しは混ぜず、切り替わりで入れ替える（二重に重なって読めなくなるのを防ぐ）
-        header(ImageDraw.Draw(im),B if w>=0.5 else A);layers=((A,1-w),(B,w))
-    for k,a in layers:
-        lay=_subs_layer(k,t,a)
-        if lay:im.alpha_composite(lay)
-    d=ImageDraw.Draw(im);yb=1066 if SPEC.get('style')=='pop' else 1012;d.rectangle((48,yb,48+1824*(i+1)/N,yb+6),fill=(255,226,40) if SPEC.get('style')=='pop' else (201,173,112));return im
+        header(ImageDraw.Draw(im), B if w >= 0.5 else A)
+        layers = ((A, 1 - w), (B, w))
+    for k, a in layers:
+        lay = _subs_layer(k, t, a)
+        if lay:
+            im.alpha_composite(lay)
+    d = ImageDraw.Draw(im)
+    yb = 1066 if SPEC.get('style') == 'pop' else 1012
+    d.rectangle((48, yb, 48 + 1824 * (i + 1) / N, yb + 6),
+                fill=(255, 226, 40) if SPEC.get('style') == 'pop' else (201, 173, 112))
+    return im
 def render_part(a,b):
     stills=[int(x) for x in os.environ['STILLS'].split(',')] if os.environ.get('STILLS') else None
     out = P(f'cache/{SLUG}_part_{a}_{b}.mp4')
