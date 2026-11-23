@@ -142,6 +142,7 @@ def test_vp_cli_dispatches_known_command(vp, monkeypatch):
 def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
     measured = {'input_i': '-15.3', 'input_tp': '-1.4', 'input_lra': '4.2',
                 'input_thresh': '-25.6', 'target_offset': '0.3'}
+    monkeypatch.setattr(vp, '_ffmpeg', lambda: '/tools/ffmpeg')
     monkeypatch.setattr(vp.yloud, 'measure_loudnorm',
                         lambda path, ffmpeg=None, lra=None: measured)
     af, got = vp.loud_args('narration.wav')
