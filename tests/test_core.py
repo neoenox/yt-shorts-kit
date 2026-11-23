@@ -120,6 +120,25 @@ def test_ctx_respects_at_and_until(vp, monkeypatch):
     assert cx.vis({'at': None, 'until': 0}) is False
 
 
+def test_vp_cli_rejects_missing_arguments(vp):
+    with pytest.raises(SystemExit, match='usage:'):
+        vp.main([])
+    with pytest.raises(SystemExit, match='usage:'):
+        vp.main(['slug'])
+    with pytest.raises(SystemExit, match='unknown command'):
+        vp.main(['slug', 'nope'])
+    with pytest.raises(SystemExit, match='part に引数が足りません'):
+        vp.main(['slug', 'part', '1'])
+
+
+def test_vp_cli_dispatches_known_command(vp, monkeypatch):
+    called = []
+    monkeypatch.setattr(vp, 'load_spec', lambda slug: called.append(('spec', slug)))
+    monkeypatch.setattr(vp, 'stage_desc', lambda: called.append('desc'))
+    vp.main(['slug', 'desc'])
+    assert called == [('spec', 'slug'), 'desc']
+
+
 def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
     measured = {'input_i': '-15.3', 'input_tp': '-1.4', 'input_lra': '4.2',
                 'input_thresh': '-25.6', 'target_offset': '0.3'}

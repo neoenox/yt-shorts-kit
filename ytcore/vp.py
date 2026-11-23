@@ -1529,18 +1529,26 @@ COMMANDS = {
     'pack': lambda args: stage_pack(),
 }
 LOCKED = ('build', 'audio', 'prep')
+# コマンドが受け取る最低限の追加引数（slug と cmd の後ろ）。still は時刻を1つ以上。
+MIN_ARGS = {'part': 2, 'still': 1, 'pvpart': 1}
+USAGE = 'usage: python scripts/vp.py <slug> ' + '|'.join(COMMANDS)
 
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    if len(args) < 2:
+        raise SystemExit(USAGE)
     slug, cmd = args[0], args[1]
+    if cmd not in COMMANDS:
+        raise SystemExit(f'unknown command: {cmd}\n{USAGE}')
+    extra = args[2:]
+    if len(extra) < MIN_ARGS.get(cmd, 0):
+        raise SystemExit(f'{cmd} に引数が足りません\n{USAGE}')
     load_spec(slug)
     if cmd in LOCKED:
         from ytcore import vp_lock
         vp_lock.acquire(ROOT, slug, cmd)   # 二重起動を防ぐ
-    if cmd not in COMMANDS:
-        raise SystemExit('unknown command')
-    return COMMANDS[cmd](args[2:])
+    return COMMANDS[cmd](extra)
 
 
 if __name__ == '__main__':
