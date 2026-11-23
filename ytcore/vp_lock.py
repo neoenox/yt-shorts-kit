@@ -91,9 +91,12 @@ def acquire(root, slug, cmd):
             '二重に起動しません。終わるのを待つか、そのプロセスを止めてください。'
         )
 
-    os.ftruncate(fd, 0)
+    metadata = f'{os.getpid()} {cmd} {time.strftime("%H:%M:%S")}'.encode('utf8')
     os.lseek(fd, 0, os.SEEK_SET)
-    os.write(fd, f'{os.getpid()} {cmd} {time.strftime("%H:%M:%S")}'.encode('utf8'))
+    os.write(fd, metadata)
+    # Never truncate the lock file to zero while holding the Windows byte lock:
+    # doing so can invalidate the locked byte and allow a second contender.
+    os.ftruncate(fd, len(metadata))
     os.fsync(fd)
 
     def release():
