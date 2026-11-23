@@ -111,12 +111,22 @@ def _conv_display(o):
     if isinstance(o,list):return [_conv_display(v) for v in o]
     return o
 def load_spec(slug):
-    global SLUG,SPEC;SLUG=slug;SPEC=_conv_display(json.loads(P(f'data/{slug}_spec.json').read_text(encoding='utf8')));return SPEC
-def theme_dir():return P('docs/themes')/SPEC['theme_dir']
+    global SLUG, SPEC
+    SLUG = slug
+    SPEC = _conv_display(json.loads(P(f'data/{slug}_spec.json').read_text(encoding='utf8')))
+    return SPEC
+
+
+def theme_dir():
+    return P('docs/themes') / SPEC['theme_dir']
+
+
 def load_runtime():
-    global TL,SEGS,N,KEYS
-    TL=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));SEGS=json.loads(P(f'out/{SLUG}_audio_report.json').read_text(encoding='utf8'))['segments']
-    N=round(TL[-1]['end']*30);KEYS=[c['key'] for c in TL]
+    global TL, SEGS, N, KEYS
+    TL = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
+    SEGS = json.loads(P(f'out/{SLUG}_audio_report.json').read_text(encoding='utf8'))['segments']
+    N = round(TL[-1]['end'] * 30)
+    KEYS = [c['key'] for c in TL]
 # ---------------------------------------------------------------- text helpers
 def tw(d, t, f):
     return d.textlength(t, font=f)
@@ -286,36 +296,86 @@ def it_stack(im,d,cx,it):
             if title:line_text(d,(x0+24,yy),title,FB[size-4],GOLD,a);yy+=size+16
             text_block(d,x0+26,yy,e['text'],size,x1-x0-52,GOLD if hi else col,a)
         y+=bh+gap
-def it_panel(im,d,cx,it):
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'));x0,y0,x1,y1=it['box'];size=it.get('size',40);col=COL.get(it.get('col','white'),WHITE);title=it.get('title');fam=it.get('fam','sans')
-    box_fill(d,(x0,y0,x1,y1),a,col=GOLD if it.get('hi') else EDGE,w=3 if it.get('hi') else 2);yy=y0+14
-    if title:line_text(d,(x0+22,yy),title,FB[34],GOLD,a);yy+=48
-    need=measure(d,it['text'],size,x1-x0-48,fam);assert yy+need<=y1+4,f'panel overflow in {cx.key}: {it["text"][:20]} need {yy+need-y1}'
-    text_block(d,x0+24,yy,it['text'],size,x1-x0-48,col,a,fam)
-def it_timeline(im,d,cx,it):
-    y=it.get('y',430);x0=it.get('x0',160);x1=it.get('x1',1760);w=it.get('w',400);size=it.get('size',36);ymax=it.get('ymax',850)
-    if not any(cx.vis(n) for n in it['nodes']):return
-    d.line([(x0,y),(x1,y)],fill=EDGE+(255,),width=5)
+def it_panel(im, d, cx, it):
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'))
+    x0, y0, x1, y1 = it['box']
+    size = it.get('size', 40)
+    col = COL.get(it.get('col', 'white'), WHITE)
+    title = it.get('title')
+    fam = it.get('fam', 'sans')
+    box_fill(d, (x0, y0, x1, y1), a, col=GOLD if it.get('hi') else EDGE,
+             w=3 if it.get('hi') else 2)
+    yy = y0 + 14
+    if title:
+        line_text(d, (x0 + 22, yy), title, FB[34], GOLD, a)
+        yy += 48
+    need = measure(d, it['text'], size, x1 - x0 - 48, fam)
+    assert yy + need <= y1 + 4, f'panel overflow in {cx.key}: {it["text"][:20]} need {yy + need - y1}'
+    text_block(d, x0 + 24, yy, it['text'], size, x1 - x0 - 48, col, a, fam)
+
+
+def it_timeline(im, d, cx, it):
+    y = it.get('y', 430)
+    x0 = it.get('x0', 160)
+    x1 = it.get('x1', 1760)
+    w = it.get('w', 400)
+    size = it.get('size', 36)
+    ymax = it.get('ymax', 850)
+    if not any(cx.vis(n) for n in it['nodes']):
+        return
+    d.line([(x0, y), (x1, y)], fill=EDGE + (255,), width=5)
     for n in it['nodes']:
-        if not cx.vis(n):continue
-        a=cx.a(n.get('at'));x=n['x'];col=COL.get(n.get('col','org'),ORG)
-        d.ellipse((x-14,y-14,x+14,y+14),fill=tuple(col)+(int(255*a),),outline=WHITE+(int(255*a),),width=3)
-        line_text(d,(x-w/2,y+28),n['label'],F[40],WHITE,a);yy=y+80
-        for l in wrapn(d,n.get('sub',''),F[size],w):line_text(d,(x-w/2,yy),l,F[size],(215,224,226),a);yy+=int(size*1.28)
-        assert yy<=ymax,f'timeline overflow in {cx.key}: {n["label"]}'
-def it_chips(im,d,cx,it):
-    n=len(it['items']);w=it.get('w',480);h=it.get('h',150);y=it.get('y',230);gap=it.get('gap',60);tot=n*w+(n-1)*gap;x=(1920-tot)//2;size=it.get('size',72)
-    for k,e in enumerate(it['items']):
+        if not cx.vis(n):
+            continue
+        a = cx.a(n.get('at'))
+        x = n['x']
+        col = COL.get(n.get('col', 'org'), ORG)
+        d.ellipse((x - 14, y - 14, x + 14, y + 14), fill=tuple(col) + (int(255 * a),),
+                  outline=WHITE + (int(255 * a),), width=3)
+        line_text(d, (x - w / 2, y + 28), n['label'], F[40], WHITE, a)
+        yy = y + 80
+        for ln in wrapn(d, n.get('sub', ''), F[size], w):
+            line_text(d, (x - w / 2, yy), ln, F[size], (215, 224, 226), a)
+            yy += int(size * 1.28)
+        assert yy <= ymax, f'timeline overflow in {cx.key}: {n["label"]}'
+
+
+def it_chips(im, d, cx, it):
+    n = len(it['items'])
+    w = it.get('w', 480)
+    h = it.get('h', 150)
+    y = it.get('y', 230)
+    gap = it.get('gap', 60)
+    tot = n * w + (n - 1) * gap
+    x = (1920 - tot) // 2
+    size = it.get('size', 72)
+    for k, e in enumerate(it['items']):
         if cx.vis(e):
-            a=cx.a(e.get('at'));xx=x+k*(w+gap);d.rounded_rectangle((xx,y,xx+w,y+h),14,outline=GOLD+(int(255*a),),width=3,fill=(12,34,50,int(255*a)))
-            f=FB[size]
-            while tw(d,e['text'],f)>w-30 and size>30:size-=4;f=FB[size]
-            line_text(d,(xx+(w-tw(d,e['text'],f))/2,y+(h-size*1.25)/2),e['text'],f,WHITE,a)
-def it_big(im,d,cx,it):
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'));size=it.get('size',56);col=COL.get(it.get('col','white'),WHITE);x0=it.get('x0',120);x1=it.get('x1',1800);fam=it.get('fam','serif')
-    text_block(d,x0,it.get('y',400),it['text'],size,x1-x0,col,a,fam)
+            a = cx.a(e.get('at'))
+            xx = x + k * (w + gap)
+            d.rounded_rectangle((xx, y, xx + w, y + h), 14,
+                                outline=GOLD + (int(255 * a),), width=3,
+                                fill=(12, 34, 50, int(255 * a)))
+            f = FB[size]
+            while tw(d, e['text'], f) > w - 30 and size > 30:
+                size -= 4
+                f = FB[size]
+            line_text(d, (xx + (w - tw(d, e['text'], f)) / 2, y + (h - size * 1.25) / 2),
+                      e['text'], f, WHITE, a)
+
+
+def it_big(im, d, cx, it):
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'))
+    size = it.get('size', 56)
+    col = COL.get(it.get('col', 'white'), WHITE)
+    x0 = it.get('x0', 120)
+    x1 = it.get('x1', 1800)
+    fam = it.get('fam', 'serif')
+    text_block(d, x0, it.get('y', 400), it['text'], size, x1 - x0, col, a, fam)
 def it_bars(im,d,cx,it):
     x0,y0,x1,y1=it['box'];title=it.get('title');unit=it.get('unit','');data=it['data'];mx=it.get('max') or max(e['value'] for e in data)
     vis_any=any(cx.vis(e) for e in data)
@@ -467,70 +527,155 @@ def it_line(im, d, cx, it):
         if s.get('show', True):
             v = s.get('vlabel', f"{s['value']}{unit}")
             line_text(d, (X - tw(d, v, F[30]) / 2, Y - 48), v, F[30], WHITE, a)
-def it_swirl(im,d,cx,it):
+def it_swirl(im, d, cx, it):
     """concept sketch of a swirl seen from above: dir 'ccw'|'cw' (as seen on screen), centre (x,y), radius r, label under it"""
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'));x,y=it['c'];R=it.get('r',150);ccw=it.get('dir','ccw')=='ccw';col=COL.get(it.get('col','blue'),BLUE);turns=2.2;n=160;pts=[]
-    for k in range(n+1):
-        u=k/n;th=(turns*2*math.pi*u)*(1 if ccw else -1)+it.get('phase',0);r=R*(1-0.88*u);pts.append((x+r*math.cos(th),y-r*math.sin(th)))
-    d.line(pts,fill=tuple(col)+(int(255*a),),width=7,joint='curve')
-    (x1_,y1_),(x2_,y2_)=pts[-6],pts[-1];ang=math.atan2(y2_-y1_,x2_-x1_);hl=26
-    d.polygon([(x2_,y2_),(x2_-hl*math.cos(ang-0.5),y2_-hl*math.sin(ang-0.5)),(x2_-hl*math.cos(ang+0.5),y2_-hl*math.sin(ang+0.5))],fill=tuple(col)+(int(255*a),))
-    d.ellipse((x-R-14,y-R-14,x+R+14,y+R+14),outline=EDGE+(int(120*a),),width=2)
-    lab=it.get('label','');f=F[it.get('lsize',34)];yy=y+R+26
-    for l in wrapn(d,lab,f,it.get('lw',520)):line_text(d,(x-tw(d,l,f)/2,yy),l,f,WHITE,a);yy+=int(it.get('lsize',34)*1.3)
-_ART={}
-def it_art(im,d,cx,it):
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'))
+    x, y = it['c']
+    R = it.get('r', 150)
+    ccw = it.get('dir', 'ccw') == 'ccw'
+    col = COL.get(it.get('col', 'blue'), BLUE)
+    turns, n, pts = 2.2, 160, []
+    for k in range(n + 1):
+        u = k / n
+        th = (turns * 2 * math.pi * u) * (1 if ccw else -1) + it.get('phase', 0)
+        r = R * (1 - 0.88 * u)
+        pts.append((x + r * math.cos(th), y - r * math.sin(th)))
+    d.line(pts, fill=tuple(col) + (int(255 * a),), width=7, joint='curve')
+    (x1_, y1_), (x2_, y2_) = pts[-6], pts[-1]
+    ang = math.atan2(y2_ - y1_, x2_ - x1_)
+    hl = 26
+    d.polygon([(x2_, y2_),
+               (x2_ - hl * math.cos(ang - 0.5), y2_ - hl * math.sin(ang - 0.5)),
+               (x2_ - hl * math.cos(ang + 0.5), y2_ - hl * math.sin(ang + 0.5))],
+              fill=tuple(col) + (int(255 * a),))
+    d.ellipse((x - R - 14, y - R - 14, x + R + 14, y + R + 14),
+              outline=EDGE + (int(120 * a),), width=2)
+    lab = it.get('label', '')
+    f = F[it.get('lsize', 34)]
+    yy = y + R + 26
+    for ln in wrapn(d, lab, f, it.get('lw', 520)):
+        line_text(d, (x - tw(d, ln, f) / 2, yy), ln, f, WHITE, a)
+        yy += int(it.get('lsize', 34) * 1.3)
+
+
+_ART = {}
+
+
+def it_art(im, d, cx, it):
     """生成イラストを、箱いっぱいに敷く（ゆっくり拡大・移動）。spec: dict(t='art',name='<images のキー>',box=[...],at=N,until=M,dim=0.7)
     note= の注意書きは既定で箱の右下。note_y= を渡すと、その高さ（画面座標）に置く（例：本文に重なる章で header の右へ逃がす）。"""
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'),.8)
-    if a<=0:return
-    x0,y0,x1,y1=it['box'];w,h=x1-x0,y1-y0;name=it['name']
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'), .8)
+    if a <= 0:
+        return
+    x0, y0, x1, y1 = it['box']
+    w, h, name = x1 - x0, y1 - y0, it['name']
     if name not in _ART:
-        src=Image.open(P(SPEC['images'][name]['file'])).convert('RGB');sc=max(w/src.width,h/src.height)*1.14
-        base=src.resize((int(src.width*sc)+1,int(src.height*sc)+1),Image.BILINEAR);_ART[name]=base
-    base=_ART[name];prog=min(1.0,max(0.0,cx.t/ max(8.0,it.get('drift',30.0))))
-    ox=int((base.width-w)*(0.15+0.7*prog)*it.get('dir',1)) if it.get('dir',1)>0 else int((base.width-w)*(0.85-0.7*prog))
-    oy=int((base.height-h)*0.5)
-    crop=base.crop((ox,oy,ox+w,oy+h)).convert('RGBA');dim=it.get('dim',0.7)
-    crop=Image.blend(crop,Image.new('RGBA',crop.size,(5,16,26,255)),1-dim)
-    mask=Image.new('L',(w,h),0);ImageDraw.Draw(mask).rounded_rectangle((0,0,w-1,h-1),18,fill=int(255*a))
-    layer=Image.new('RGBA',(w,h),(0,0,0,0));layer.paste(crop,(0,0),mask);im.alpha_composite(layer,(x0,y0))
+        src = Image.open(P(SPEC['images'][name]['file'])).convert('RGB')
+        sc = max(w / src.width, h / src.height) * 1.14
+        base = src.resize((int(src.width * sc) + 1, int(src.height * sc) + 1), Image.BILINEAR)
+        _ART[name] = base
+    base = _ART[name]
+    prog = min(1.0, max(0.0, cx.t / max(8.0, it.get('drift', 30.0))))
+    if it.get('dir', 1) > 0:
+        ox = int((base.width - w) * (0.15 + 0.7 * prog) * it.get('dir', 1))
+    else:
+        ox = int((base.width - w) * (0.85 - 0.7 * prog))
+    oy = int((base.height - h) * 0.5)
+    crop = base.crop((ox, oy, ox + w, oy + h)).convert('RGBA')
+    dim = it.get('dim', 0.7)
+    crop = Image.blend(crop, Image.new('RGBA', crop.size, (5, 16, 26, 255)), 1 - dim)
+    mask = Image.new('L', (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), 18, fill=int(255 * a))
+    layer = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    layer.paste(crop, (0, 0), mask)
+    im.alpha_composite(layer, (x0, y0))
     if it.get('note'):
-        f=F[it.get('note_size',24)];tw_=int(d.textlength(it['note'],font=f));ln=ImageDraw.Draw(im,'RGBA');nx=x1-tw_-34;ny=it.get('note_y',y1-(36+it.get('note_size',24)))
-        ln.rounded_rectangle((nx-12,ny-6,x1-14,ny+34),10,fill=(5,16,26,int(215*a)));ln.text((nx,ny),it['note'],font=f,fill=(215,224,226,int(255*a)))
-def it_shade(im,d,cx,it):
+        f = F[it.get('note_size', 24)]
+        tw_ = int(d.textlength(it['note'], font=f))
+        ln = ImageDraw.Draw(im, 'RGBA')
+        nx = x1 - tw_ - 34
+        ny = it.get('note_y', y1 - (36 + it.get('note_size', 24)))
+        ln.rounded_rectangle((nx - 12, ny - 6, x1 - 14, ny + 34), 10,
+                             fill=(5, 16, 26, int(215 * a)))
+        ln.text((nx, ny), it['note'], font=f, fill=(215, 224, 226, int(255 * a)))
+
+
+def it_shade(im, d, cx, it):
     """暗い下地（文字を読みやすくする）。spec: dict(t='shade',box=[...],at=N,until=M,alpha=0.8)"""
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'),.5)
-    if a<=0:return
-    x0,y0,x1,y1=it['box'];lay=Image.new('RGBA',(x1-x0,y1-y0),(0,0,0,0));ImageDraw.Draw(lay).rounded_rectangle((0,0,x1-x0-1,y1-y0-1),16,fill=(6,18,29,int(255*it.get('alpha',0.8)*a)));im.alpha_composite(lay,(x0,y0))
-_ANIM_BOUND=[False]
-def it_anim(im,d,cx,it):
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'), .5)
+    if a <= 0:
+        return
+    x0, y0, x1, y1 = it['box']
+    lay = Image.new('RGBA', (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    ImageDraw.Draw(lay).rounded_rectangle((0, 0, x1 - x0 - 1, y1 - y0 - 1), 16,
+                                          fill=(6, 18, 29, int(255 * it.get('alpha', 0.8) * a)))
+    im.alpha_composite(lay, (x0, y0))
+
+
+_ANIM_BOUND = [False]
+
+
+def it_anim(im, d, cx, it):
     """自作アニメーション部品（scripts/vp_anim.py）。spec: dict(t='anim',name='...',box=[...],at=N,until=M,...)"""
-    if not cx.vis(it):return
-    a=cx.a(it.get('at'))
-    if a<=0:return
+    if not cx.vis(it):
+        return
+    a = cx.a(it.get('at'))
+    if a <= 0:
+        return
     import vp_anim
-    if not _ANIM_BOUND[0]:vp_anim.bind(globals());_ANIM_BOUND[0]=True
-    vp_anim.DRAW[it['name']](im,d,cx,it,a)
-ITEMS=dict(shade=it_shade,art=it_art,anim=it_anim,swirl=it_swirl,line=it_line,daybar=it_daybar,stack=it_stack,panel=it_panel,image=it_image,timeline=it_timeline,chips=it_chips,big=it_big,bars=it_bars,table=it_table,cols2=it_cols2,flow=it_flow)
-def opener(im,d,cx):
-    ch=SPEC['chapters'][cx.ci];un=ch.get('opener_until',0)
-    if cx.idx()>=un:return
-    a=cx.a(0,0.4) if cx.idx()>=0 else 1.0;txt=ch.get('opener',ch.get('chapter_title',''));f=FB[64];ls=wrapn(d,txt,f,1500);h=len(ls)*int(64*1.35);y=ch.get('opener_y',520)-h//2
-    box_fill(d,(160,y-30,1760,y+h+22),a,col=GOLD,w=3)
-    for l in ls:line_text(d,((1920-tw(d,l,f))/2,y),l,f,GOLD,a);y+=int(64*1.35)
-def render_scene(im,d,cx):
-    opener(im,d,cx)
+    if not _ANIM_BOUND[0]:
+        vp_anim.bind(globals())
+        _ANIM_BOUND[0] = True
+    vp_anim.DRAW[it['name']](im, d, cx, it, a)
+
+
+ITEMS = dict(
+    shade=it_shade, art=it_art, anim=it_anim, swirl=it_swirl, line=it_line,
+    daybar=it_daybar, stack=it_stack, panel=it_panel, image=it_image,
+    timeline=it_timeline, chips=it_chips, big=it_big, bars=it_bars,
+    table=it_table, cols2=it_cols2, flow=it_flow,
+)
+
+
+def opener(im, d, cx):
+    ch = SPEC['chapters'][cx.ci]
+    un = ch.get('opener_until', 0)
+    if cx.idx() >= un:
+        return
+    a = cx.a(0, 0.4) if cx.idx() >= 0 else 1.0
+    txt = ch.get('opener', ch.get('chapter_title', ''))
+    f = FB[64]
+    ls = wrapn(d, txt, f, 1500)
+    h = len(ls) * int(64 * 1.35)
+    y = ch.get('opener_y', 520) - h // 2
+    box_fill(d, (160, y - 30, 1760, y + h + 22), a, col=GOLD, w=3)
+    for ln in ls:
+        line_text(d, ((1920 - tw(d, ln, f)) / 2, y), ln, f, GOLD, a)
+        y += int(64 * 1.35)
+
+
+def render_scene(im, d, cx):
+    opener(im, d, cx)
     for it in SPEC['chapters'][cx.ci]['scene']:
-        ITEMS[it['t']](im,d,cx,it) if it['t']!='image' else it_image(im,d,cx,it)
-        d=ImageDraw.Draw(im,'RGBA')
-def header(d,ci):
-    if SPEC.get('style')=='pop':
-        import vp_anim_pop as PP;PP.bind(globals());return PP.header(d,ci)
-    d.text((48,16),SPEC['chapters'][ci].get('title',''),font=FB[60],fill=WHITE,stroke_width=5,stroke_fill=(5,10,16));d.text((48,94),SPEC['header_sub'],font=F[28],fill=(200,210,214),stroke_width=4,stroke_fill=(5,10,16))
+        ITEMS[it['t']](im, d, cx, it) if it['t'] != 'image' else it_image(im, d, cx, it)
+        d = ImageDraw.Draw(im, 'RGBA')
+
+
+def header(d, ci):
+    if SPEC.get('style') == 'pop':
+        import vp_anim_pop as PP
+        PP.bind(globals())
+        return PP.header(d, ci)
+    d.text((48, 16), SPEC['chapters'][ci].get('title', ''),
+           font=FB[60], fill=WHITE, stroke_width=5, stroke_fill=(5, 10, 16))
+    d.text((48, 94), SPEC['header_sub'],
+           font=F[28], fill=(200, 210, 214), stroke_width=4, stroke_fill=(5, 10, 16))
 # ---------------------------------------------------------------- subtitles / frames
 def split_clauses(txt,maxc=42):
     """42字を超える字幕は、読点の切れ目で分け、1回に出す量を減らす（時間は文字数に比例）"""
