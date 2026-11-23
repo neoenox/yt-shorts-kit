@@ -112,8 +112,8 @@ def test_snap_bounds_uses_pauses_and_keeps_minimum_cue(vp):
 
 
 def test_ctx_respects_at_and_until(vp, monkeypatch):
-    monkeypatch.setattr(vp, 'SEGS', [{'scene': 0, 'start': 1.0, 'end': 3.0}])
-    monkeypatch.setattr(vp, 'KEYS', ['章'])
+    monkeypatch.setattr(vp.STATE, 'segs', [{'scene': 0, 'start': 1.0, 'end': 3.0}])
+    monkeypatch.setattr(vp.STATE, 'keys', ['章'])
     cx = vp.Ctx(0, 2.0)
     assert cx.vis({'at': 0}) is True
     assert cx.vis({'at': 1}) is False
@@ -151,6 +151,92 @@ def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
 
 
 # ---- 二重起動防止
+
+def test_part_fingerprint_is_isolated_per_chapter(vp, tmp_path):
+    """他章の spec / 画像を変えても、ある章だけを含む part の指紋は変わらない。"""
+    import json
+    from PIL import Image
+
+    (tmp_path / 'data').mkdir(exist_ok=True)
+    (tmp_path / 'assets').mkdir(exist_ok=True)
+    for name, col in (('a.png', (1, 2, 3)), ('b.png', (4, 5, 6)), ('c.png', (7, 8, 9))):
+        Image.new('RGB', (8, 8), col).save(tmp_path / 'assets' / name)
+    spec = {
+        'theme_dir': 't', 'header_sub': 'h',
+        'chapters': [
+            {'key': 'a', 'title': 'A', 'scene': [{'t': 'image', 'name': 'ia', 'box': [0, 0, 10, 10]}]},
+            {'key': 'b', 'title': 'B', 'scene': [{'t': 'image', 'name': 'ib', 'box': [0, 0, 10, 10]}]},
+            {'key': 'c', 'title': 'C', 'scene': [{'t': 'image', 'name': 'ic', 'box': [0, 0, 10, 10]}]},
+        ],
+        'images': {
+            'ia': {'file': 'assets/a.png'},
+            'ib': {'file': 'assets/b.png'},
+            'ic': {'file': 'assets/c.png'},
+        },
+        'bgm': [],
+    }
+    (tmp_path / 'data' / 'x_spec.json').write_text(json.dumps(spec, ensure_ascii=False), encoding='utf8')
+    (tmp_path / 'data' / 'x_timeline.json').write_text(json.dumps([
+        {'key': 'a', 'id': 0, 'start': 0.0, 'duration': 2.0, 'end': 2.0},
+        {'key': 'b', 'id': 1, 'start': 2.0, 'duration': 2.0, 'end': 4.0},
+        {'key': 'c', 'id': 2, 'start': 4.0, 'duration': 2.0, 'end': 6.0},
+    ], ensure_ascii=False), encoding='utf8')
+    (tmp_path / 'out').mkdir(exist_ok=True)
+    (tmp_path / 'out' / 'x_audio_report.json').write_text(json.dumps({'segments': []}, ensure_ascii=False), encoding='utf8')
+
+    vp.load_spec('x')
+    vp.load_runtime()
+    codefp = 'dummy-code-fp'
+    chapter_fps = {ci: vp._chapter_fp(ci) for ci in range(len(vp.STATE.tl))}
+    # 章Aの part（前後1章 = 章B までを見る）と章Cの part
+    a_before = vp._part_fp(0, 29, codefp, chapter_fps)
+    c_before = vp._part_fp(120, 149, codefp, chapter_fps)
+
+    spec['chapters'][2]['title'] = 'C改'
+    (tmp_path / 'data' / 'x_spec.json').write_text(json.dumps(spec, ensure_ascii=False), encoding='utf8')
+    vp.load_spec('x')
+    vp.load_runtime()
+    chapter_fps2 = {ci: vp._chapter_fp(ci) for ci in range(len(vp.STATE.tl))}
+    a_after = vp._part_fp(0, 29, codefp, chapter_fps2)
+    c_after = vp._part_fp(120, 149, codefp, chapter_fps2)
+
+    assert a_after == a_before   # 2章先の章Cを変えても章Aの part は再利用できる
+    assert c_after != c_before   # 章Cの part は作り直す
+
+
+def test_render_state_keeps_two_specs_independent(vp, monkeypatch, tmp_path):
+    """2つの RenderState を切り替えても、互いの spec/timeline が混ざらない。"""
+    import json
+    (tmp_path / 'data').mkdir(exist_ok=True)
+    (tmp_path / 'out').mkdir(exist_ok=True)
+    for slug, title in (('a', 'A章'), ('b', 'B章')):
+        (tmp_path / 'data' / f'{slug}_spec.json').write_text(json.dumps({
+            'theme_dir': 't', 'header_sub': 'h',
+            'chapters': [{'key': 'ch', 'title': title, 'chapter_title': title, 'scene': []}],
+            'images': {}, 'bgm': [],
+        }, ensure_ascii=False), encoding='utf8')
+        (tmp_path / 'data' / f'{slug}_timeline.json').write_text(json.dumps(
+            [{'key': 'ch', 'id': 0, 'start': 0.0, 'duration': 5.0, 'end': 5.0}], ensure_ascii=False), encoding='utf8')
+        (tmp_path / 'out' / f'{slug}_audio_report.json').write_text(json.dumps({'segments': []}, ensure_ascii=False), encoding='utf8')
+
+    states = []
+    for slug in ('a', 'b'):
+        st = vp.RenderState()
+        st.load_spec(slug)
+        st.load_runtime()
+        states.append(st)
+
+    assert states[0].spec['chapters'][0]['title'] == 'A章'
+    assert states[1].spec['chapters'][0]['title'] == 'B章'
+    assert states[0].keys == states[1].keys == ['ch']
+    # proxy は各 state の現在値を読む（差し替えにも追従）
+    pa, pb = states[0].as_dict(), states[1].as_dict()
+    assert pa['SPEC'] is states[0].spec
+    assert pb['SPEC'] is states[1].spec
+    assert pa['P']('x') == vp.P('x')
+    states[0].load_spec('a')   # 再ロードしても pb は影響しない
+    assert pb['SPEC'] is states[1].spec
+
 
 def test_lock_alive_detects_current_process():
     assert vp_lock.alive(os.getpid())
