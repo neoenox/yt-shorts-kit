@@ -424,15 +424,22 @@ def it_table(im,d,cx,it):
             for j,l in enumerate(ls):line_text(d,(x,yy+j*int(size*1.25)),l,F[size],tcol,a)
             hmax=max(hmax,len(ls)*int(size*1.25));x+=w
         yy+=hmax+14;assert yy<=y1+4,f'table overflow in {cx.key}'
-def it_cols2(im,d,cx,it):
-    if not cx.vis(it):return
-    for side,(bx0,bx1) in (('left',(it.get('x0',60),it.get('xm',940))),('right',(it.get('xm2',980),it.get('x1',1860)))):
-        sp=it.get(side)
-        if not sp:continue
-        e=dict(t='stack',x0=bx0,x1=bx1,y0=sp.get('y0',170),size=it.get('size',34),items=sp['items'],gap=12)
+def it_cols2(im, d, cx, it):
+    if not cx.vis(it):
+        return
+    sides = (('left', (it.get('x0', 60), it.get('xm', 940))),
+             ('right', (it.get('xm2', 980), it.get('x1', 1860))))
+    for side, (bx0, bx1) in sides:
+        sp = it.get(side)
+        if not sp:
+            continue
+        e = dict(t='stack', x0=bx0, x1=bx1, y0=sp.get('y0', 170),
+                 size=it.get('size', 34), items=sp['items'], gap=12)
         if sp.get('title') and cx.on(sp.get('title_at')):
-            box_fill(d,(bx0,170,bx1,250),cx.a(sp.get('title_at')),col=GOLD,w=3);line_text(d,(bx0+22,180),sp['title'],FB[40],GOLD,cx.a(sp.get('title_at')));e['y0']=266
-        it_stack(im,d,cx,e)
+            box_fill(d, (bx0, 170, bx1, 250), cx.a(sp.get('title_at')), col=GOLD, w=3)
+            line_text(d, (bx0 + 22, 180), sp['title'], FB[40], GOLD, cx.a(sp.get('title_at')))
+            e['y0'] = 266
+        it_stack(im, d, cx, e)
 def it_flow(im,d,cx,it):
     nodes=it['nodes'];n=len(nodes);y=it.get('y',400);h=it.get('h',140);gap=60;w=(1800-(n-1)*gap)//n;x=60;size=it.get('size',34)
     for k,e in enumerate(nodes):
@@ -836,36 +843,63 @@ def render_part(a,b):
     assert proc.returncode == 0
 # ---------------------------------------------------------------- stages
 def stage_story():
-    t=(theme_dir()/'09_script_v2.md').read_text(encoding='utf8');chs=re.split(r'\n## ',t)[1:];scenes=[];keys=[c['key'] for c in SPEC['chapters']]
+    t = (theme_dir() / '09_script_v2.md').read_text(encoding='utf8')
+    chs = re.split(r'\n## ', t)[1:]
+    scenes = []
+    keys = [c['key'] for c in SPEC['chapters']]
     for c in chs:
-        head=c.split('\n')[0];m=re.match(r'章(\d+)　(.*)',head)
-        if not m:continue
-        n=int(m.group(1));lines=[re.sub(r'〔[^〕]*〕','',re.sub(r'^\d+\. ','',l)).strip() for l in c.split('\n') if re.match(r'^\d+\. ',l)]
-        scenes.append(dict(id=n-1,key=keys[n-1],title=m.group(2),narration=''.join(lines)))
-    assert len(scenes)==len(keys),f'{len(scenes)} chapters in script vs {len(keys)} in spec'
-    P(f'data/{SLUG}_scenes.json').write_text(json.dumps(scenes,ensure_ascii=False,indent=1),encoding='utf8')
-    pr=P(f'data/{SLUG}_pronunciations.json')
-    if not pr.exists():pr.write_text('{}',encoding='utf8')
-    n=sum(len(s['narration']) for s in scenes);print(len(scenes),'scenes',n,'chars  est. minutes',round(n/290,1))
+        head = c.split('\n')[0]
+        m = re.match(r'章(\d+)　(.*)', head)
+        if not m:
+            continue
+        n = int(m.group(1))
+        lines = [re.sub(r'〔[^〕]*〕', '', re.sub(r'^\d+\. ', '', l)).strip()
+                 for l in c.split('\n') if re.match(r'^\d+\. ', l)]
+        scenes.append(dict(id=n - 1, key=keys[n - 1], title=m.group(2), narration=''.join(lines)))
+    assert len(scenes) == len(keys), f'{len(scenes)} chapters in script vs {len(keys)} in spec'
+    P(f'data/{SLUG}_scenes.json').write_text(json.dumps(scenes, ensure_ascii=False, indent=1), encoding='utf8')
+    pr = P(f'data/{SLUG}_pronunciations.json')
+    if not pr.exists():
+        pr.write_text('{}', encoding='utf8')
+    n = sum(len(s['narration']) for s in scenes)
+    print(len(scenes), 'scenes', n, 'chars  est. minutes', round(n / 290, 1))
+
+
 def _vv():
     import requests
-    style=vv.speaker_id(VOICE['speaker'],VOICE['style'],base=BASE,timeout=60)
-    return requests,style
-def sentences(sc):return [x.strip()+'。' for x in sc['narration'].split('。') if x.strip()]
+    style = vv.speaker_id(VOICE['speaker'], VOICE['style'], base=BASE, timeout=60)
+    return requests, style
+
+
+def sentences(sc):
+    return [x.strip() + '。' for x in sc['narration'].split('。') if x.strip()]
+
+
 def load_dic():
     """読みの辞書。全動画で共有する data/pronunciations_common.json に、動画ごとの辞書を重ねる（同じ語は動画ごとの方が勝つ）"""
-    d={};c=P('data/pronunciations_common.json')
-    if c.exists():d.update(json.loads(c.read_text(encoding='utf8')))
-    d.update(json.loads(P(f'data/{SLUG}_pronunciations.json').read_text(encoding='utf8')));return d
+    d = {}
+    c = P('data/pronunciations_common.json')
+    if c.exists():
+        d.update(json.loads(c.read_text(encoding='utf8')))
+    d.update(json.loads(P(f'data/{SLUG}_pronunciations.json').read_text(encoding='utf8')))
+    return d
 def stage_kana():
-    requests,style=_vv();dic=load_dic();out=[]
+    requests, style = _vv()
+    dic = load_dic()
+    out = []
     for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
         for x in sentences(s):
-            sp_=vv.apply_pron(x,dic)
-            q=requests.post(BASE+'/audio_query',params={'text':sp_,'speaker':style},timeout=60).json();out.append(f"[{s['key']}] {x}\n    {q['kana']}")
-    P(f'out/{SLUG}_kana.txt').write_text('\n'.join(out),encoding='utf8');print(len(out),'sentences ->',f'out/{SLUG}_kana.txt')
+            sp_ = vv.apply_pron(x, dic)
+            q = requests.post(BASE + '/audio_query', params={'text': sp_, 'speaker': style},
+                              timeout=60).json()
+            out.append(f"[{s['key']}] {x}\n    {q['kana']}")
+    P(f'out/{SLUG}_kana.txt').write_text('\n'.join(out), encoding='utf8')
+    print(len(out), 'sentences ->', f'out/{SLUG}_kana.txt')
+
+
 def readwav(p):
-    with wave.open(str(p),'rb') as w:return np.frombuffer(w.readframes(w.getnframes()),np.int16),w.getframerate()
+    with wave.open(str(p), 'rb') as w:
+        return np.frombuffer(w.readframes(w.getnframes()), np.int16), w.getframerate()
 def writewav(p,a,rate):
     with wave.open(str(p),'wb') as w:w.setnchannels(1);w.setsampwidth(2);w.setframerate(rate);w.writeframes(a.astype(np.int16).tobytes())
 SNAP_TOL=0.5;DIP_TOL=0.35;MIN_CUE=0.45
@@ -1233,37 +1267,55 @@ def stage_build(chunk=1000, bgm_db=-6.0):
         }, ensure_ascii=False, indent=1), encoding='utf8')
     stage_qa()
 def stage_qa():
-    load_runtime();v=P(f'out/{SLUG}_video.mp4');r=subprocess.run([_ffprobe(),'-v','error','-show_entries','format=duration','-of','csv=p=0',str(v)],capture_output=True,text=True);dur=float(r.stdout.strip())
-    assert abs(dur-TL[-1]['end'])<1.0,f'video {dur:.2f}s != timeline {TL[-1]["end"]:.2f}s'
-    dec=subprocess.run([_ffmpeg(),'-v','error','-i',str(v),'-f','null','-'],capture_output=True,text=True);assert not dec.stderr.strip(),dec.stderr[:300]
-    lufs,_=yloud.measure_ebur128(v,ffmpeg=_ffmpeg())
-    blk=[(a,a+d) for a,d in yqa.black_spans(v,ffmpeg=_ffmpeg())]
-    lt=f'{lufs:.1f}' if lufs is not None else 'N/A'
+    load_runtime()
+    v = P(f'out/{SLUG}_video.mp4')
+    r = subprocess.run([_ffprobe(), '-v', 'error', '-show_entries', 'format=duration',
+                        '-of', 'csv=p=0', str(v)], capture_output=True, text=True)
+    dur = float(r.stdout.strip())
+    assert abs(dur - TL[-1]['end']) < 1.0, f'video {dur:.2f}s != timeline {TL[-1]["end"]:.2f}s'
+    dec = subprocess.run([_ffmpeg(), '-v', 'error', '-i', str(v), '-f', 'null', '-'],
+                         capture_output=True, text=True)
+    assert not dec.stderr.strip(), dec.stderr[:300]
+    lufs, _ = yloud.measure_ebur128(v, ffmpeg=_ffmpeg())
+    blk = [(a, a + d) for a, d in yqa.black_spans(v, ffmpeg=_ffmpeg())]
+    lt = f'{lufs:.1f}' if lufs is not None else 'N/A'
     print(f'QA {SLUG}: {dur:.1f}s decode ok  {lt} LUFS  black segments {blk}')
     # contact sheet: first sentence of every chapter + the last-but-one sentence
-    pts=[]
+    pts = []
     for c in TL:
-        ss=[x for x in SEGS if x['scene']==c['id']];pts+= [ss[0]['start']+1.0, ss[len(ss)//2]['start']+1.0, ss[-1]['start']+1.0]
-    d=P(f'out/{SLUG}_review');d.mkdir(exist_ok=True,parents=True)
-    for k,t in enumerate(pts):subprocess.run([_ffmpeg(),'-v','error','-y','-ss',f'{t:.2f}','-i',str(v),'-frames:v','1','-vf','scale=640:-1',str(d/f'f{k:02d}.png')])
-    cols=3;rows=math.ceil(len(pts)/cols);per=12
-    for s in range(0,len(pts),per):
-        sub=list(range(s,min(s+per,len(pts))));W=Image.new('RGB',(1920,360*math.ceil(len(sub)/3)))
-        for q,k in enumerate(sub):W.paste(Image.open(d/f'f{k:02d}.png'),((q%3)*640,(q//3)*360))
-        W.save(d/f'sheet_{s//per}.png')
-    print('contact sheets in',d)
+        ss = [x for x in SEGS if x['scene'] == c['id']]
+        pts += [ss[0]['start'] + 1.0, ss[len(ss) // 2]['start'] + 1.0, ss[-1]['start'] + 1.0]
+    d = P(f'out/{SLUG}_review')
+    d.mkdir(exist_ok=True, parents=True)
+    for k, t in enumerate(pts):
+        subprocess.run([_ffmpeg(), '-v', 'error', '-y', '-ss', f'{t:.2f}', '-i', str(v),
+                        '-frames:v', '1', '-vf', 'scale=640:-1', str(d / f'f{k:02d}.png')])
+    cols, rows, per = 3, math.ceil(len(pts) / 3), 12
+    for s in range(0, len(pts), per):
+        sub = list(range(s, min(s + per, len(pts))))
+        sheet = Image.new('RGB', (1920, 360 * math.ceil(len(sub) / 3)))
+        for q, k in enumerate(sub):
+            sheet.paste(Image.open(d / f'f{k:02d}.png'), ((q % 3) * 640, (q // 3) * 360))
+        sheet.save(d / f'sheet_{s // per}.png')
+    print('contact sheets in', d)
     # 任意: ffmpeg-skill の外部検査を足す（既定はオフ。既存の QA 結果を上書きしない）
     #   VP_FFMPEG_SKILL_QA=1 python scripts/vp.py <slug> qa
-    if os.environ.get('VP_FFMPEG_SKILL_QA')=='1':
+    if os.environ.get('VP_FFMPEG_SKILL_QA') == '1':
         try:
             import ffmpeg_skill_check
-            rc=ffmpeg_skill_check.main([str(v),'--platform','youtube','--content'])
+            rc = ffmpeg_skill_check.main([str(v), '--platform', 'youtube', '--content'])
             print('ffmpeg-skill QA:', 'FAIL あり' if rc else 'FAIL なし')
         except Exception as e:
-            print('ffmpeg-skill QA を実行できませんでした:',type(e).__name__,str(e)[:160])
+            print('ffmpeg-skill QA を実行できませんでした:', type(e).__name__, str(e)[:160])
+
+
 def chapter_list():
-    tl=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));ts=lambda s:f'{int(s)//60}:{int(s)%60:02d}'
-    return [f'{ts(c["start"])} {SPEC["chapters"][i].get("chapter_title",SPEC["chapters"][i].get("title",c["key"]))}' for i,c in enumerate(tl)],tl[-1]['end']
+    tl = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
+    ts = lambda s: f'{int(s) // 60}:{int(s) % 60:02d}'
+    chapters = [f'{ts(c["start"])} '
+                f'{SPEC["chapters"][i].get("chapter_title", SPEC["chapters"][i].get("title", c["key"]))}'
+                for i, c in enumerate(tl)]
+    return chapters, tl[-1]['end']
 class _Maou(dict):
     _JP=BGM_NAMES
     def __missing__(s,k):
@@ -1306,33 +1358,79 @@ def stage_desc():
     P(f'out/{SLUG}_description.md').write_text('\n'.join(L) + '\n', encoding='utf8')
     print('\n'.join(chapters), '\nduration', f'{int(dur // 60)}分{int(dur % 60)}秒')
 def stage_thumb():
-    th=SPEC['thumb'];W,H=1280,720;FDW=FONTS['dir']
+    th = SPEC['thumb']
+    W, H = 1280, 720
+    FDW = FONTS['dir']
+
     def font(n):
-        if n>=100:f=ImageFont.truetype(FDW+FONTS['serif'],n);f.set_variation_by_axes([900]);return f
-        f=ImageFont.truetype(FDW+FONTS['sans'],n);f.set_variation_by_axes([800]);return f
-    def st(d,xy,text,f,fill,sw=10):d.text(xy,text,font=f,fill=fill,stroke_width=sw,stroke_fill=(6,10,18))
+        if n >= 100:
+            f = ImageFont.truetype(FDW + FONTS['serif'], n)
+            f.set_variation_by_axes([900])
+            return f
+        f = ImageFont.truetype(FDW + FONTS['sans'], n)
+        f.set_variation_by_axes([800])
+        return f
+
+    def st(d, xy, text, f, fill, sw=10):
+        d.text(xy, text, font=f, fill=fill, stroke_width=sw, stroke_fill=(6, 10, 18))
+
     if th.get('bg'):
-        im=Image.open(P(th['bg'])).convert('RGBA');s=max(W/im.width,H/im.height);im=im.resize((int(im.width*s)+1,int(im.height*s)+1),Image.LANCZOS);x=(im.width-W)//2;y=(im.height-H)//2;im=im.crop((x,y,x+W,y+H))
-        sh=Image.new('RGBA',(W,H),tuple(th.get('shade_col',(4,10,20)))+(255,));g=Image.new('L',(W,1));px=g.load()
-        for xx in range(W):px[xx,0]=int(235*max(0,min(1,(th.get('shade_x',760)-xx)/th.get('shade_w',560))))
-        sh.putalpha(g.resize((W,H)));im.alpha_composite(sh)
+        im = Image.open(P(th['bg'])).convert('RGBA')
+        s = max(W / im.width, H / im.height)
+        im = im.resize((int(im.width * s) + 1, int(im.height * s) + 1), Image.LANCZOS)
+        x, y = (im.width - W) // 2, (im.height - H) // 2
+        im = im.crop((x, y, x + W, y + H))
+        sh = Image.new('RGBA', (W, H), tuple(th.get('shade_col', (4, 10, 20))) + (255,))
+        g = Image.new('L', (W, 1))
+        px = g.load()
+        for xx in range(W):
+            px[xx, 0] = int(235 * max(0, min(1, (th.get('shade_x', 760) - xx) / th.get('shade_w', 560))))
+        sh.putalpha(g.resize((W, H)))
+        im.alpha_composite(sh)
     else:
-        im=Image.new('RGBA',(W,H),NAVY+(255,));meta=SPEC['images'][th['image']];pic=Image.open(P(meta['file'])).convert('RGB');c=th.get('crop') or meta.get('crop')
-        if c:pic=pic.crop((int(pic.width*c[0]),int(pic.height*c[1]),int(pic.width*c[2]),int(pic.height*c[3])))
-        pw,ph=th.get('pic_w',560),H-80;s=max(pw/pic.width,ph/pic.height);pic=pic.resize((int(pic.width*s)+1,int(pic.height*s)+1),Image.LANCZOS);x=(pic.width-pw)//2;y=(pic.height-ph)//2;pic=pic.crop((x,y,x+pw,y+ph))
-        if th.get('sepia',True):
-            from PIL import ImageEnhance,ImageOps
-            pic=ImageOps.colorize(ImageEnhance.Contrast(pic).enhance(1.15).convert('L'),(18,14,10),(238,226,196)).convert('RGB')
-        im.alpha_composite(pic.convert('RGBA'),(W-pw-40,40));ImageDraw.Draw(im).rectangle((W-pw-40,40,W-40,H-40),outline=GOLD,width=6)
-    d=ImageDraw.Draw(im);y=th.get('y0',30)
-    for text,size,col in th['lines']:
-        st(d,(50,y),text,font(size),WHITE if col=='white' else tuple(th.get('accent',GOLD)),12 if size>=100 else 8);y+=int(size*1.2)
-    by=th.get('bar_y',520);d.rectangle((54,by,th.get('bar_w',640),by+12),fill=tuple(th.get('bar_col',RED)));st(d,(50,by+35),th['sub'],font(th.get('sub_size',38)),WHITE,6)
-    out=P(f'out/{SLUG}_thumbnail.jpg');im.convert('RGB').save(out,quality=92);print(out,round(out.stat().st_size/1e3),'KB')
+        im = Image.new('RGBA', (W, H), NAVY + (255,))
+        meta = SPEC['images'][th['image']]
+        pic = Image.open(P(meta['file'])).convert('RGB')
+        c = th.get('crop') or meta.get('crop')
+        if c:
+            pic = pic.crop((int(pic.width * c[0]), int(pic.height * c[1]),
+                            int(pic.width * c[2]), int(pic.height * c[3])))
+        pw, ph = th.get('pic_w', 560), H - 80
+        s = max(pw / pic.width, ph / pic.height)
+        pic = pic.resize((int(pic.width * s) + 1, int(pic.height * s) + 1), Image.LANCZOS)
+        x, y = (pic.width - pw) // 2, (pic.height - ph) // 2
+        pic = pic.crop((x, y, x + pw, y + ph))
+        if th.get('sepia', True):
+            from PIL import ImageEnhance, ImageOps
+            pic = ImageOps.colorize(ImageEnhance.Contrast(pic).enhance(1.15).convert('L'),
+                                    (18, 14, 10), (238, 226, 196)).convert('RGB')
+        im.alpha_composite(pic.convert('RGBA'), (W - pw - 40, 40))
+        ImageDraw.Draw(im).rectangle((W - pw - 40, 40, W - 40, H - 40), outline=GOLD, width=6)
+    d = ImageDraw.Draw(im)
+    y = th.get('y0', 30)
+    for text, size, col in th['lines']:
+        st(d, (50, y), text, font(size),
+           WHITE if col == 'white' else tuple(th.get('accent', GOLD)),
+           12 if size >= 100 else 8)
+        y += int(size * 1.2)
+    by = th.get('bar_y', 520)
+    d.rectangle((54, by, th.get('bar_w', 640), by + 12), fill=tuple(th.get('bar_col', RED)))
+    st(d, (50, by + 35), th['sub'], font(th.get('sub_size', 38)), WHITE, 6)
+    out = P(f'out/{SLUG}_thumbnail.jpg')
+    im.convert('RGB').save(out, quality=92)
+    print(out, round(out.stat().st_size / 1e3), 'KB')
+
+
 def stage_pack():
     import make_upload_pack as M
-    vid=P(f'out/{SLUG}_video.mp4');srt=P(f'out/{SLUG}_subtitles.srt');assert vid.stat().st_mtime>=srt.stat().st_mtime-1,f'{vid.name} is older than the subtitles (stale build?) - rebuild before pack'
-    name=SPEC['pack'];M.build(name,dict(video=f'out/{SLUG}_video.mp4',thumb=f'out/{SLUG}_thumbnail.jpg',srt=f'out/{SLUG}_subtitles.srt',desc=f'out/{SLUG}_description.md',title_no=SPEC['desc'].get('title_no',1)))
+    vid = P(f'out/{SLUG}_video.mp4')
+    srt = P(f'out/{SLUG}_subtitles.srt')
+    assert vid.stat().st_mtime >= srt.stat().st_mtime - 1, \
+        f'{vid.name} is older than the subtitles (stale build?) - rebuild before pack'
+    name = SPEC['pack']
+    M.build(name, dict(video=f'out/{SLUG}_video.mp4', thumb=f'out/{SLUG}_thumbnail.jpg',
+                       srt=f'out/{SLUG}_subtitles.srt', desc=f'out/{SLUG}_description.md',
+                       title_no=SPEC['desc'].get('title_no', 1)))
 # ---------------------------------------------------------------- CLI
 def _cmd_part(args):
     load_runtime()
