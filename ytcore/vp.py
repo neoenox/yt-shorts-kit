@@ -118,39 +118,78 @@ def load_runtime():
     TL=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));SEGS=json.loads(P(f'out/{SLUG}_audio_report.json').read_text(encoding='utf8'))['segments']
     N=round(TL[-1]['end']*30);KEYS=[c['key'] for c in TL]
 # ---------------------------------------------------------------- text helpers
-def tw(d,t,f):return d.textlength(t,font=f)
-def wrap(d,text,font,maxw):
-    if tw(d,text,font)<=maxw:return [text]
-    best=None
-    for k in range(1,len(text)):
-        l1,l2=text[:k],text[k:];w1,w2=tw(d,l1,font),tw(d,l2,font)
-        if w1>maxw or w2>maxw or _nobreak(text[k-1],text[k]):continue
-        score=max(w1,w2)+(400 if ('゠'<=text[k-1]<='ヿ' and '゠'<=text[k]<='ヿ') else 0)+(0 if text[k-1] in '、，。' else (70 if text[k-1] in 'はがをにのでとも' and not ('\u4e00'<=text[k]<='\u9fff' and '\u4e00'<=text[k-1]<='\u9fff') else 150))
-        if best is None or score<best[0]:best=(score,[l1,l2])
-    if best:return best[1]
-    lines=[];cur=''
+def tw(d, t, f):
+    return d.textlength(t, font=f)
+
+
+def wrap(d, text, font, maxw):
+    """Wrap text into two lines at the best clause boundary."""
+    if tw(d, text, font) <= maxw:
+        return [text]
+    best = None
+    for k in range(1, len(text)):
+        l1, l2 = text[:k], text[k:]
+        w1, w2 = tw(d, l1, font), tw(d, l2, font)
+        if w1 > maxw or w2 > maxw or _nobreak(text[k - 1], text[k]):
+            continue
+        katakana_bonus = 400 if ('゠' <= text[k - 1] <= 'ヿ' and '゠' <= text[k] <= 'ヿ') else 0
+        if text[k - 1] in '、，。':
+            punct_cost = 0
+        elif (text[k - 1] in 'はがをにのでとも'
+              and not ('\u4e00' <= text[k] <= '\u9fff' and '\u4e00' <= text[k - 1] <= '\u9fff')):
+            punct_cost = 70
+        else:
+            punct_cost = 150
+        score = max(w1, w2) + katakana_bonus + punct_cost
+        if best is None or score < best[0]:
+            best = (score, [l1, l2])
+    if best:
+        return best[1]
+    lines, cur = [], ''
     for ch in text:
-        if tw(d,cur+ch,font)>maxw and cur:lines.append(cur);cur=ch
-        else:cur+=ch
-    lines.append(cur);return lines
-_UNIT='分秒時間年月日倍％度回世紀万千円人歳'
-def _nobreak(a,b):
+        if tw(d, cur + ch, font) > maxw and cur:
+            lines.append(cur)
+            cur = ch
+        else:
+            cur += ch
+    lines.append(cur)
+    return lines
+
+
+_UNIT = '分秒時間年月日倍％度回世紀万千円人歳'
+
+
+def _nobreak(a, b):
     """True if a line break between characters a|b is not allowed (digits, units, opening/closing brackets)"""
     return (a.isdigit() and (b.isdigit() or b in _UNIT or b in '.:：点')) or (a in '.:：点' and b.isdigit()) or a in '（「『(' or b in '）」』、。,)'
-def wrapn(d,text,font,maxw):
+
+
+def wrapn(d, text, font, maxw):
     """wrap to any number of lines: greedy, backtracking to the last allowed break position"""
-    out=[];cur=''
+    out, cur = [], ''
     for ch in text:
-        if tw(d,cur+ch,font)>maxw and cur:
-            k=len(cur)
-            while k>0 and _nobreak(cur[k-1],cur[k] if k<len(cur) else ch):k-=1
-            if k==0:k=len(cur)
-            out.append(cur[:k]);cur=cur[k:]+ch
-        else:cur+=ch
-    if cur:out.append(cur)
+        if tw(d, cur + ch, font) > maxw and cur:
+            k = len(cur)
+            while k > 0 and _nobreak(cur[k - 1], cur[k] if k < len(cur) else ch):
+                k -= 1
+            if k == 0:
+                k = len(cur)
+            out.append(cur[:k])
+            cur = cur[k:] + ch
+        else:
+            cur += ch
+    if cur:
+        out.append(cur)
     return out
-def ease(x):x=min(1,max(0,x));return x*x*(3-2*x)
-def line_text(d,xy,text,font,fill=WHITE,a=1.0):d.text(xy,text,font=font,fill=tuple(fill[:3])+(int(255*a),))
+
+
+def ease(x):
+    x = min(1, max(0, x))
+    return x * x * (3 - 2 * x)
+
+
+def line_text(d, xy, text, font, fill=WHITE, a=1.0):
+    d.text(xy, text, font=font, fill=tuple(fill[:3]) + (int(255 * a),))
 def box_fill(d,box,a,col=EDGE,w=2,fill=BG):
     d.rounded_rectangle(box,12,fill=tuple(fill[:3])+(int(fill[3]*a) if len(fill)>3 else int(255*a),),outline=tuple(col[:3])+(int(255*a),),width=w)
 def text_block(d,x,y,text,size,maxw,col=WHITE,a=1.0,fam='sans',lh=1.3):
