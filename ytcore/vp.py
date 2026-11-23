@@ -829,55 +829,106 @@ def stage_audio():
     ), ensure_ascii=False, indent=1), encoding='utf8')
     print('total', round(cursor, 1), 's', int(cursor // 60), 'min', int(cursor % 60), 's')
 def stage_bgm():
-    SR=48000;D=P(BGM['dir']);tl=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));T={c['key']:c for c in tl};TOTAL=tl[-1]['end'];XF=3.0;TARGET=-24.0
+    SR = 48000
+    D = P(BGM['dir'])
+    tl = json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'))
+    T = {c['key']: c for c in tl}
+    TOTAL = tl[-1]['end']
+    XF, TARGET = 3.0, -24.0
+
     def load_(name):
-        f=str(D/BGM['pattern'].format(name=name));raw=subprocess.run([_ffmpeg(),'-v','error','-i',f,'-ar',str(SR),'-ac','2','-f','f32le','-'],capture_output=True).stdout
-        x=np.frombuffer(raw,np.float32).reshape(-1,2).T.astype(np.float64)
-        lufs,_=yloud.measure_ebur128(f,ffmpeg=_ffmpeg())
-        if lufs is None:raise RuntimeError(f'BGM の音量を測れませんでした: {f}')
-        return x*10**((TARGET-lufs)/20)
-    fade=lambda n,k:(lambda u:np.sin(u*np.pi/2) if k=='in' else np.cos(u*np.pi/2))(np.linspace(0,1,n))
-    def fill(x,length):
-        xf=int(XF*SR);out=x.copy()
-        while out.shape[1]<length:
-            a,b=out,x;out=np.concatenate([a[:,:-xf],a[:,-xf:]*fade(xf,'out')+b[:,:xf]*fade(xf,'in'),b[:,xf:]],axis=1)
-        return out[:,:length]
-    n_=int(TOTAL*SR);mix=np.zeros((2,n_));cache={}
-    for a,b,name in SPEC['bgm']:
-        s=T[a]['start'];e=T[b]['end'];s0=max(0,s-XF/2);e0=min(TOTAL,e+XF/2);n=int((e0-s0)*SR)
-        if name not in cache:cache[name]=load_(name)
-        seg=fill(cache[name],n).copy();fi=int(XF*SR) if s0>0 else 0;fo=int(XF*SR) if e0<TOTAL else 0
-        if fi:seg[:,:fi]*=fade(fi,'in')
-        if fo:seg[:,-fo:]*=fade(fo,'out')
-        i=int(s0*SR);mix[:,i:i+n]+=seg[:,:n_-i]
-    fi=int(2*SR);fo=int(6*SR);env=np.ones(n_);env[:fi]=np.linspace(0,1,fi);env[-fo:]=np.minimum(env[-fo:],np.linspace(1,0,fo)**1.5);mix*=env;pk=np.abs(mix).max()
-    if pk>.9:mix*=.9/pk
-    with wave.open(str(P(f'out/{SLUG}_bgm.wav')),'wb') as w:w.setnchannels(2);w.setsampwidth(2);w.setframerate(SR);w.writeframes((mix.T*32767).astype(np.int16).tobytes())
-    print('bgm ok',round(TOTAL,1),'s')
+        f = str(D / BGM['pattern'].format(name=name))
+        raw = subprocess.run([_ffmpeg(), '-v', 'error', '-i', f, '-ar', str(SR),
+                              '-ac', '2', '-f', 'f32le', '-'], capture_output=True).stdout
+        x = np.frombuffer(raw, np.float32).reshape(-1, 2).T.astype(np.float64)
+        lufs, _ = yloud.measure_ebur128(f, ffmpeg=_ffmpeg())
+        if lufs is None:
+            raise RuntimeError(f'BGM の音量を測れませんでした: {f}')
+        return x * 10 ** ((TARGET - lufs) / 20)
+
+    fade = lambda n, k: (lambda u: np.sin(u * np.pi / 2) if k == 'in' else np.cos(u * np.pi / 2))(np.linspace(0, 1, n))
+
+    def fill(x, length):
+        xf, out = int(XF * SR), x.copy()
+        while out.shape[1] < length:
+            a, b = out, x
+            out = np.concatenate([a[:, :-xf], a[:, -xf:] * fade(xf, 'out') + b[:, :xf] * fade(xf, 'in'), b[:, xf:]], axis=1)
+        return out[:, :length]
+
+    n_ = int(TOTAL * SR)
+    mix = np.zeros((2, n_))
+    cache = {}
+    for a, b, name in SPEC['bgm']:
+        s, e = T[a]['start'], T[b]['end']
+        s0, e0 = max(0, s - XF / 2), min(TOTAL, e + XF / 2)
+        n = int((e0 - s0) * SR)
+        if name not in cache:
+            cache[name] = load_(name)
+        seg = fill(cache[name], n).copy()
+        fi = int(XF * SR) if s0 > 0 else 0
+        fo = int(XF * SR) if e0 < TOTAL else 0
+        if fi:
+            seg[:, :fi] *= fade(fi, 'in')
+        if fo:
+            seg[:, -fo:] *= fade(fo, 'out')
+        i = int(s0 * SR)
+        mix[:, i:i + n] += seg[:, :n_ - i]
+    fi, fo = int(2 * SR), int(6 * SR)
+    env = np.ones(n_)
+    env[:fi] = np.linspace(0, 1, fi)
+    env[-fo:] = np.minimum(env[-fo:], np.linspace(1, 0, fo) ** 1.5)
+    mix *= env
+    pk = np.abs(mix).max()
+    if pk > .9:
+        mix *= .9 / pk
+    with wave.open(str(P(f'out/{SLUG}_bgm.wav')), 'wb') as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(SR)
+        w.writeframes((mix.T * 32767).astype(np.int16).tobytes())
+    print('bgm ok', round(TOTAL, 1), 's')
 def loud_args(path):
     j=yloud.measure_loudnorm(path,ffmpeg=_ffmpeg(),lra=9)
     if j is None:raise RuntimeError(f'loudnorm の測定に失敗しました: {path}')
     return yloud.loudnorm_filter(j,i=-14,tp=-1.5,lra=9),j
 def _code_fp():
     """描画に関わるコード全体の指紋（コードが変わったら、全部品を作り直す）"""
-    h=hashlib.sha1()
-    for f in sorted([Path(__file__)]+list(PLUGIN_DIR.glob('vp_anim*.py'))+[Path(m.__file__) for m in (hn_text,thin_commas,rich)],key=lambda f:f.name):   # 実体は ytcore（shim ではなく中身の指紋を取る）。名前順にして、移す前と同じ並びで指紋を取る
-        if f.name.startswith(('vp_before','vp_check','vp_preview','vp_lock','vp_remix')) or not f.exists():continue
-        b=f.read_bytes().replace(b'\r',b'')   # 行末(CRLF/LF)は、チェックアウトの設定でツリーごとに違う。指紋は内容だけで取る
-        if f.name=='vp.py':   # vp.py は、描画の部分（text helpers〜stages）だけを見る。コマンドや段取りの変更で、部品を作り直さない
-            t=b.decode('utf8').replace('\r','');a_=t.index('# ---------------------------------------------------------------- text helpers');z_=t.index('# ---------------------------------------------------------------- stages');b=t[a_:z_].encode('utf8')
-        h.update(f.name.encode());h.update(b)
+    h = hashlib.sha1()
+    # 実体は ytcore（shim ではなく中身の指紋を取る）。名前順にして、移す前と同じ並びで指紋を取る
+    files = [Path(__file__)] + list(PLUGIN_DIR.glob('vp_anim*.py'))
+    files += [Path(m.__file__) for m in (hn_text, thin_commas, rich)]
+    for f in sorted(files, key=lambda f: f.name):
+        if f.name.startswith(('vp_before', 'vp_check', 'vp_preview', 'vp_lock', 'vp_remix')) or not f.exists():
+            continue
+        # 行末(CRLF/LF)は、チェックアウトの設定でツリーごとに違う。指紋は内容だけで取る
+        b = f.read_bytes().replace(b'\r', b'')
+        if f.name == 'vp.py':
+            # vp.py は、描画の部分（text helpers〜stages）だけを見る。
+            # コマンドや段取りの変更で、部品を作り直さない
+            t = b.decode('utf8').replace('\r', '')
+            a_ = t.index('# ---------------------------------------------------------------- text helpers')
+            z_ = t.index('# ---------------------------------------------------------------- stages')
+            b = t[a_:z_].encode('utf8')
+        h.update(f.name.encode())
+        h.update(b)
     return h.hexdigest()
-def _part_fp(a,b,codefp):
+
+
+def _part_fp(a, b, codefp):
     """フレーム a〜b の部品の指紋：該当する章（と前後の章）の定義、文の時刻、画像ファイル、全体の長さ、描画コード"""
-    t0,t1=a/30-1.0,b/30+1.0
-    cis=sorted({x for ci,c in enumerate(TL) if c['end']>=t0 and c['start']<=t1 for x in (ci-1,ci,ci+1) if 0<=x<len(TL)})
-    h=hashlib.sha1();imgs={}
-    for k,m in (SPEC.get('images') or {}).items():
-        f=P(m['file']);imgs[k]=[m,f.stat().st_size if f.exists() else -1,f.stat().st_mtime_ns if f.exists() else -1]
-    h.update(json.dumps([SPEC.get('style'),imgs,N,codefp],sort_keys=True,ensure_ascii=False).encode())
+    t0, t1 = a / 30 - 1.0, b / 30 + 1.0
+    cis = sorted({x for ci, c in enumerate(TL) if c['end'] >= t0 and c['start'] <= t1
+                  for x in (ci - 1, ci, ci + 1) if 0 <= x < len(TL)})
+    h = hashlib.sha1()
+    imgs = {}
+    for k, m in (SPEC.get('images') or {}).items():
+        f = P(m['file'])
+        imgs[k] = [m, f.stat().st_size if f.exists() else -1,
+                   f.stat().st_mtime_ns if f.exists() else -1]
+    h.update(json.dumps([SPEC.get('style'), imgs, N, codefp], sort_keys=True, ensure_ascii=False).encode())
     for ci in cis:
-        h.update(json.dumps([ci,SPEC['chapters'][ci],TL[ci],[x for x in SEGS if x['scene']==ci]],sort_keys=True,ensure_ascii=False).encode())
+        h.update(json.dumps([ci, SPEC['chapters'][ci], TL[ci], [x for x in SEGS if x['scene'] == ci]],
+                            sort_keys=True, ensure_ascii=False).encode())
     return h.hexdigest()
 def stage_build(chunk=1000,bgm_db=-6.0):
     load_runtime();chunk=int(os.environ.get('VP_CHUNK',chunk))   # 部品の長さ（フレーム）。短くすると、差分再描画の粒度が細かくなる
