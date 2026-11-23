@@ -1,12 +1,14 @@
 """縦型Short（1080x1920）を作る。排水の渦の長尺から、約45秒に切り出した試作。
 usage: python scripts/make_short.py drain      # 音声→画面→mp4 -> out/short_drain.mp4, _subtitles.srt, _description.md
 台本・画面は SHORTS['drain'] に書く。ナレーションの数字・限定は、長尺の台本（docs/themes/20261017_drain/09_script_v2.md）と一致させる。
-VOICEVOX(四国めたん)が 127.0.0.1:50021 で動いていること。"""
+VOICEVOX の場所は環境変数 VOICEVOX_URL（既定 http://127.0.0.1:50021）。ffmpeg は FFMPEG / PATH から探す。"""
 import json, math, re, subprocess, sys, wave
 from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from ytkit.project import project_root, load_config, require   # 共通部品（E:\yt-shorts-kit）
+from ytkit import voicevox as vv
+from ytkit.ffmpeg_tools import find_ffmpeg
+from ytkit.project import project_root, load_config, require   # 共通部品
 
 ROOT = project_root(__file__)   # 環境変数 YT_PROJECT_ROOT(プロジェクト側の入口 scripts/*.py が設定する)、無ければ cwd から上へ channel.toml を探す
 CFG = load_config(ROOT)         # チャンネル設定 ROOT/channel.toml（名前・ナレーター・BGM・フォント）
@@ -23,7 +25,6 @@ BGM = _sect('bgm', ('file', 'credit'))
 FONTS = _sect('fonts', ('dir', 'sans', 'serif'))
 TAGS = _sect('hashtags', ('shorts', 'tiktok'))
 FD = FONTS['dir']   # 旧名（他のスクリプトが import していても動くように残す）
-BASE = 'http://127.0.0.1:50021'
 SPEED = 0.95
 W, H, FPS = 1080, 1920, 30
 NAVY = (9, 22, 34); GOLD = (239, 201, 118); WHITE = (245, 243, 232); DIM = (190, 205, 208)
@@ -210,13 +211,13 @@ def draw_visual(d, kind, a, k):
 
 
 def synth(spec, work):
-    from ytkit import voicevox as vv   # 共通部品（E:\yt-shorts-kit）
-    style = vv.speaker_id(VOICE['speaker'], VOICE['style'], base=BASE, timeout=60)
+    # 共通部品（VOICEVOX_URL は vv.base_url() で読む）
+    style = vv.speaker_id(VOICE['speaker'], VOICE['style'], base=vv.base_url(), timeout=60)
     dic = json.loads((ROOT / spec['pron']).read_text(encoding='utf8'))
     segs, pcms, rate, t = [], [], 24000, 0.25
     for i, sc in enumerate(spec['scenes']):
         spoken = vv.apply_pron(sc['text'], dic)
-        wav, kana = vv.synth(spoken, style, SPEED, intonation=1.08, base=BASE)
+        wav, kana = vv.synth(spoken, style, SPEED, intonation=1.08, base=vv.base_url())
         p = work / f'n_{i:02}.wav'; p.write_bytes(wav)
         with wave.open(str(p)) as w:
             pcm = np.frombuffer(w.readframes(w.getnframes()), np.int16); rate = w.getframerate()
@@ -255,7 +256,7 @@ def chunks(text, maxc=15, lines=2):
     return out
 
 
-def render(spec, segs, total, work, out_mp4):
+def render(spec, segs, total, work, out_mp4, slug):
     n = round(total * FPS)
     cache = {}
     cks = []
@@ -268,8 +269,8 @@ def render(spec, segs, total, work, out_mp4):
     st = lambda t: (lambda ms: f'{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}')(round(t * 1000))
     for i, (a, b, c, _) in enumerate(cks):
         srt.append(f'{i + 1}\n{st(a)} --> {st(b)}\n{c}')
-    (ROOT / 'out' / 'short_drain_subtitles.srt').write_text('\n\n'.join(srt) + '\n', encoding='utf8')
-    proc = subprocess.Popen(['ffmpeg', '-y', '-v', 'warning', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', 'pipe:0',
+    (ROOT / 'out' / f'short_{slug}_subtitles.srt').write_text('\n\n'.join(srt) + '\n', encoding='utf8')
+    proc = subprocess.Popen([find_ffmpeg(), '-y', '-v', 'warning', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', 'pipe:0',
                              '-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p', str(out_mp4)], stdin=subprocess.PIPE)
     for fi in range(n):
         t = fi / FPS
@@ -293,14 +294,18 @@ def render(spec, segs, total, work, out_mp4):
             cache[key] = im.convert('RGB').tobytes()
             if len(cache) > 400: cache.pop(next(iter(cache)))
         proc.stdin.write(cache[key])
-    proc.stdin.close(); proc.wait()
+    proc.stdin.close()
+    rc = proc.wait()
+    if rc:
+        raise subprocess.CalledProcessError(rc, 'ffmpeg', f'Short {slug} の映像エンコードに失敗')
 
 
 def mix(spec, work, total, out_mp4, final):
     narration = str(work / 'narration.wav')
+    ff = find_ffmpeg()
     if spec.get('bgm') == 'none':
         # BGMなし（TikTok用）。ナレーションだけを -14 LUFS にそろえる。
-        subprocess.run(['ffmpeg', '-y', '-v', 'warning', '-i', str(out_mp4), '-i', narration,
+        subprocess.run([ff, '-y', '-v', 'warning', '-i', str(out_mp4), '-i', narration,
                         '-filter_complex', '[1:a]aresample=48000,loudnorm=I=-14:TP=-1.5:LRA=7[a]',
                         '-map', '0:v', '-map', '[a]', '-t', f'{total:.2f}', '-c:v', 'copy',
                         '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', str(final)], check=True)
@@ -308,7 +313,7 @@ def mix(spec, work, total, out_mp4, final):
     bgm = ROOT / BGM['file']
     fc = ('[1:a]aresample=48000,volume=0.30,afade=t=in:d=1,afade=t=out:st=%.2f:d=1.5[b];[2:a]aresample=48000,asplit=2[n1][n2];'
           '[b][n1]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=400[bd];[bd][n2]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=7[a]') % (total - 1.5)
-    subprocess.run(['ffmpeg', '-y', '-v', 'warning', '-i', str(out_mp4), '-stream_loop', '-1', '-i', str(bgm), '-i', narration,
+    subprocess.run([ff, '-y', '-v', 'warning', '-i', str(out_mp4), '-stream_loop', '-1', '-i', str(bgm), '-i', narration,
                     '-filter_complex', fc, '-map', '0:v', '-map', '[a]', '-t', f'{total:.2f}', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', str(final)], check=True)
 
 
@@ -342,13 +347,16 @@ def description(spec):
 
 
 def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
     name = sys.argv[1]; spec = SHORTS[name]
     work = ROOT / 'cache' / f'short_{name}'; work.mkdir(parents=True, exist_ok=True)
     segs, total = synth(spec, work)
     (ROOT / 'out' / f'short_{name}_kana.txt').write_text('\n'.join(f"{s['text']}\n    {s['kana']}" for s in segs), encoding='utf8')
     print('narration', round(total, 1), 's')
     raw = work / 'raw.mp4'
-    render(spec, segs, total, work, raw)
+    render(spec, segs, total, work, raw, name)
     mix(spec, work, total, raw, ROOT / 'out' / f'short_{name}.mp4')
     (ROOT / 'out' / f'short_{name}_description.md').write_text(description(spec), encoding='utf8')
     print('done -> out/short_%s.mp4' % name)

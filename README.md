@@ -1,6 +1,6 @@
 # yt-shorts-kit
 
-複数のYouTube動画制作リポジトリで共有する**部品**。描画・台本形式・規約ゲートは入れていません（チャンネルごとに違うため）。
+複数のYouTube動画制作リポジトリで共有するパッケージ。`ytkit` は土台の部品、`ytcore` は描画コア。台本形式・規約ゲートはチャンネルごとに違うため入れていません。
 
 | モジュール | 中身 | 使っているリポジトリ |
 |---|---|---|
@@ -54,14 +54,14 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 - 履歴を書き換えない(公開済みのため)。メールアドレスは GitHub の noreply アドレスにしてある。
 
 ## 環境変数
-`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）。
+`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）。ytcore の各パイプラインもこれらの環境変数を `ytkit` 経由で読みます。
 
-## 今後の方針
-最終的に、動画制作のコア(長尺 `vp`、Short 描画 `make_short`/`make_short2`、`hn_text`、`rich_text` など)もここへ移す。
-各プロジェクトはチャンネル固有の値を `channel.toml` に置き、コアはそれを読む。モジュール名は変えない(`import vp` のまま使える)。
+## 方針
+長尺 `vp`、Short 描画 `make_short` / `make_short2`、`hn_text`、`rich_text` などの描画コアは、すでにここへ移行済みです。モジュール名は変えず、プロジェクト側の `scripts/<名前>.py` を薄い入口にして呼びます。
+各プロジェクトはチャンネル固有の値を `channel.toml` に置き、コアはそれを読む。実行ファイル・サービスの場所は環境変数で渡します。
 手順書・確認の仕組み・`yt_api.py` のようにチャンネル固有のものは、各プロジェクトに残す。
 
 ## 変えるときの決まり
-- 全リポジトリに効く。変更したら両方の `pytest` を回す（`tests/test_kit.py` は移行前の出力文字列と一致することを確かめている）。
-- チャンネル固有の値（話者、パス、規約）はここに書かず、呼ぶ側から渡す。
+- 全リポジトリに効く。変更したら両方の `pytest` を回す（`tests/test_kit.py` は移行前の出力文字列、`tests/test_core.py` はytcore のテキスト整形・字幕境界・ロックを確かめている）。
+- チャンネル固有の値（話者・BGM・パス・規約）は `channel.toml`、実行ファイルやサービスの場所は環境変数で渡し、ここに固定しない。
 - 規約ゲート・承認・公開の処理はここに入れない。

@@ -11,8 +11,19 @@ from pathlib import Path
 
 
 def alive(pid):
+    """PID が生きているか。Windows は OpenProcess、それ以外は kill(pid, 0) で調べる。"""
     if pid <= 0:
         return False
+    if os.name != 'nt':
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
     k = ctypes.windll.kernel32
     h = k.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
     if not h:

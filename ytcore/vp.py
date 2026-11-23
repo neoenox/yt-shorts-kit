@@ -13,10 +13,12 @@ from ytcore import hn_text,thin_commas,rich_text as rich
 from ytcore.hn_text import display
 from ytcore.thin_commas import thin
 from PIL import Image,ImageDraw,ImageFont
-from ytkit.project import project_root,load_config,section,require   # 共通部品（E:\yt-shorts-kit）
+from ytkit.project import project_root,load_config,section,require   # 共通部品
+from ytkit import voicevox as vv,loudness as yloud,qa as yqa
+from ytkit.ffmpeg_tools import find_ffmpeg,find_ffprobe
 ROOT=project_root(__file__);CFG=load_config(ROOT)   # チャンネル設定 ROOT/channel.toml（環境変数 YT_PROJECT_ROOT でプロジェクトの場所を変えられる）
 CH=section(CFG,'channel',('about','terms_check'));VOICE=section(CFG,'voice',('speaker','style','speed','label','credit_long'));BGM=section(CFG,'bgm',('dir','pattern','credit_long'));BGM_NAMES=require(CFG,'bgm.names');FONTS=section(CFG,'fonts',('dir','sans','serif'))
-FD=FONTS['dir'];BASE='http://127.0.0.1:50021';SPEED=VOICE['speed']
+FD=FONTS['dir'];BASE=vv.base_url();SPEED=VOICE['speed']   # VOICEVOX_URL は ytkit.voicevox が読む
 PLUGIN_DIR=ROOT/require(CFG,'project.plugin_dir');sys.path.insert(0,str(PLUGIN_DIR))   # プロジェクト側のプラグイン（vp_anim*・make_upload_pack・ffmpeg_skill_check）を import できるように。置き場所は channel.toml の [project] plugin_dir
 XFADE=0.35  # 章の切れ目のクロスフェード（秒）
 BG=(7,24,36,240);GOLD=(239,201,118);WHITE=(245,243,232);DIM=(190,205,208);EDGE=(176,153,100);NAVY=(9,22,34);ORG=(255,150,90);BLUE=(120,190,255);VIO=(170,135,255);GRN=(120,210,150);RED=(235,90,80)
@@ -34,6 +36,8 @@ class _Fam:
 F=_Fam('sans');FB=_Fam('serif');FSUB=_Fam('sub')
 SLUG=None;SPEC=None;TL=None;SEGS=None;N=0;KEYS=[]
 def P(rel):return ROOT/rel
+def _ffmpeg():return find_ffmpeg()
+def _ffprobe():return find_ffprobe(find_ffmpeg(),default='ffprobe')
 # 画面に出す文字は、数量・回数・順序を算用数字にする（字幕と同じ規則。慣用句は hn_text.KEEP で保護）
 _TXT={'text','title','sub','chapter_title','opener','cells','lines'}
 def _cv(v):
@@ -429,7 +433,7 @@ def render_part(a,b):
             write=staticmethod(lambda b:None);close=staticmethod(lambda:None)
         def wait(self):pass
         returncode=0
-    proc=_P() if stills else subprocess.Popen(['ffmpeg','-y','-v','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an',*(['-c:v','libx264','-preset','veryfast','-crf','19'] if os.environ.get('VP_ENC')=='libx264' else ['-c:v','h264_nvenc','-preset','p4','-cq','19','-b:v','0']),'-pix_fmt','yuv420p',str(out)],stdin=subprocess.PIPE,stderr=log)
+    proc=_P() if stills else subprocess.Popen([_ffmpeg(),'-y','-v','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an',*(['-c:v','libx264','-preset','veryfast','-crf','19'] if os.environ.get('VP_ENC')=='libx264' else ['-c:v','h264_nvenc','-preset','p4','-cq','19','-b:v','0']),'-pix_fmt','yuv420p',str(out)],stdin=subprocess.PIPE,stderr=log)
     try:
         for i in (stills or range(a,min(b,N))):
             im=render_frame(i);proc.stdin.write(im.convert('RGB').tobytes())
@@ -452,7 +456,8 @@ def stage_story():
     n=sum(len(s['narration']) for s in scenes);print(len(scenes),'scenes',n,'chars  est. minutes',round(n/290,1))
 def _vv():
     import requests
-    sp=requests.get(BASE+'/speakers',timeout=60).json();speaker=next(x for x in sp if x['name']==VOICE['speaker']);style=next(x['id'] for x in speaker['styles'] if x['name']==VOICE['style']);return requests,speaker,style
+    style=vv.speaker_id(VOICE['speaker'],VOICE['style'],base=BASE,timeout=60)
+    return requests,style
 def sentences(sc):return [x.strip()+'。' for x in sc['narration'].split('。') if x.strip()]
 def load_dic():
     """読みの辞書。全動画で共有する data/pronunciations_common.json に、動画ごとの辞書を重ねる（同じ語は動画ごとの方が勝つ）"""
@@ -460,11 +465,10 @@ def load_dic():
     if c.exists():d.update(json.loads(c.read_text(encoding='utf8')))
     d.update(json.loads(P(f'data/{SLUG}_pronunciations.json').read_text(encoding='utf8')));return d
 def stage_kana():
-    requests,spk,style=_vv();dic=load_dic();out=[]
+    requests,style=_vv();dic=load_dic();out=[]
     for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
         for x in sentences(s):
-            sp_=x
-            for k,v in sorted(dic.items(),key=lambda z:-len(z[0])):sp_=sp_.replace(k,v)
+            sp_=vv.apply_pron(x,dic)
             q=requests.post(BASE+'/audio_query',params={'text':sp_,'speaker':style},timeout=60).json();out.append(f"[{s['key']}] {x}\n    {q['kana']}")
     P(f'out/{SLUG}_kana.txt').write_text('\n'.join(out),encoding='utf8');print(len(out),'sentences ->',f'out/{SLUG}_kana.txt')
 def readwav(p):
@@ -533,7 +537,7 @@ def snap_bounds(seg,fr):
         out.append(t);prev=t
     return out
 def stage_audio():
-    requests,speaker,style=_vv();folder=P(f'cache/{SLUG}_audio');folder.mkdir(exist_ok=True,parents=True)
+    requests,style=_vv();folder=P(f'cache/{SLUG}_audio');folder.mkdir(exist_ok=True,parents=True)
     voice=SPEC.get('voice',{})
     speed=float(voice.get('speed',SPEED));pre=float(voice.get('pre_phoneme',.15));post=float(voice.get('post_phoneme',.35));scene_hold=float(voice.get('scene_hold',1.6))
     dic=load_dic();scenes=json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8'))
@@ -541,8 +545,7 @@ def stage_audio():
     for sc in scenes:
         local=[];t=0
         for i,text in enumerate(sentences(sc)):
-            spoken=text
-            for k,v in sorted(dic.items(),key=lambda x:-len(x[0])):spoken=spoken.replace(k,v)
+            spoken=vv.apply_pron(text,dic)
             p=folder/f'{sc["id"]:02}_{i:02}.wav';key=hashlib.sha256((spoken+f'|{speed}|1.08|{pre}|{post}|'+str(style)).encode()).hexdigest();meta=p.with_suffix('.json')
             if not p.exists() or not meta.exists() or json.loads(meta.read_text())['key']!=key:
                 q=requests.post(BASE+'/audio_query',params={'text':spoken,'speaker':style},timeout=120).json();q.update(speedScale=speed,intonationScale=1.08,prePhonemeLength=pre,postPhonemeLength=post,outputSamplingRate=24000)
@@ -573,10 +576,11 @@ def stage_audio():
 def stage_bgm():
     SR=48000;D=P(BGM['dir']);tl=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));T={c['key']:c for c in tl};TOTAL=tl[-1]['end'];XF=3.0;TARGET=-24.0
     def load_(name):
-        f=str(D/BGM['pattern'].format(name=name));raw=subprocess.run(['ffmpeg','-v','error','-i',f,'-ar',str(SR),'-ac','2','-f','f32le','-'],capture_output=True).stdout
+        f=str(D/BGM['pattern'].format(name=name));raw=subprocess.run([_ffmpeg(),'-v','error','-i',f,'-ar',str(SR),'-ac','2','-f','f32le','-'],capture_output=True).stdout
         x=np.frombuffer(raw,np.float32).reshape(-1,2).T.astype(np.float64)
-        r=subprocess.run(['ffmpeg','-hide_banner','-nostats','-i',f,'-af','ebur128','-f','null','-'],capture_output=True,text=True,encoding='utf8',errors='replace').stderr
-        lufs=float(r.split('Integrated loudness:')[1].split('I:')[1].split('LUFS')[0]);return x*10**((TARGET-lufs)/20)
+        lufs,_=yloud.measure_ebur128(f,ffmpeg=_ffmpeg())
+        if lufs is None:raise RuntimeError(f'BGM の音量を測れませんでした: {f}')
+        return x*10**((TARGET-lufs)/20)
     fade=lambda n,k:(lambda u:np.sin(u*np.pi/2) if k=='in' else np.cos(u*np.pi/2))(np.linspace(0,1,n))
     def fill(x,length):
         xf=int(XF*SR);out=x.copy()
@@ -596,9 +600,9 @@ def stage_bgm():
     with wave.open(str(P(f'out/{SLUG}_bgm.wav')),'wb') as w:w.setnchannels(2);w.setsampwidth(2);w.setframerate(SR);w.writeframes((mix.T*32767).astype(np.int16).tobytes())
     print('bgm ok',round(TOTAL,1),'s')
 def loud_args(path):
-    r=subprocess.run(['ffmpeg','-hide_banner','-nostats','-i',str(path),'-af','loudnorm=I=-14:TP=-1.5:LRA=9:print_format=json','-f','null','-'],capture_output=True,text=True)
-    j=json.loads(re.search(r'\{[^{}]*"input_i"[^{}]*\}',r.stderr,re.S).group(0))
-    return f"loudnorm=I=-14:TP=-1.5:LRA=9:measured_I={j['input_i']}:measured_TP={j['input_tp']}:measured_LRA={j['input_lra']}:measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true",j
+    j=yloud.measure_loudnorm(path,ffmpeg=_ffmpeg(),lra=9)
+    if j is None:raise RuntimeError(f'loudnorm の測定に失敗しました: {path}')
+    return yloud.loudnorm_filter(j,i=-14,tp=-1.5,lra=9),j
 def _code_fp():
     """描画に関わるコード全体の指紋（コードが変わったら、全部品を作り直す）"""
     h=hashlib.sha1()
@@ -665,12 +669,12 @@ def stage_build(chunk=1000,bgm_db=-6.0):
     assert not miss,f'部品が足りない: {miss}'
     lst=P(f'cache/{SLUG}_parts.txt');lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts))
     wav=P(f'out/{SLUG}_narration.wav');nob=P(f'out/{SLUG}_video_nobgm.mp4');af,j=loud_args(wav)
-    subprocess.run(['ffmpeg','-y','-v','warning','-f','concat','-safe','0','-i',str(lst),'-i',str(wav),'-map','0:v','-map','1:a','-c:v','copy','-af',af,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(nob)],check=True)
+    subprocess.run([_ffmpeg(),'-y','-v','warning','-f','concat','-safe','0','-i',str(lst),'-i',str(wav),'-map','0:v','-map','1:a','-c:v','copy','-af',af,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(nob)],check=True)
     mix=P(f'cache/{SLUG}_mix.wav');bgm=P(f'out/{SLUG}_bgm.wav')
     fc=f"[0:a]aresample=48000,pan=stereo|c0=c0|c1=c0,asplit=2[n1][n2];[1:a]volume={bgm_db}dB[bg];[bg][n2]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=900:makeup=1[duck];[n1][duck]amix=inputs=2:normalize=0:duration=first[m]"
-    subprocess.run(['ffmpeg','-y','-v','warning','-i',str(wav),'-i',str(bgm),'-filter_complex',fc,'-map','[m]','-c:a','pcm_s16le',str(mix)],check=True)
+    subprocess.run([_ffmpeg(),'-y','-v','warning','-i',str(wav),'-i',str(bgm),'-filter_complex',fc,'-map','[m]','-c:a','pcm_s16le',str(mix)],check=True)
     af2,j2=loud_args(mix);out=P(f'out/{SLUG}_video.mp4')
-    subprocess.run(['ffmpeg','-y','-v','warning','-i',str(nob),'-i',str(mix),'-map','0:v','-map','1:a','-c:v','copy','-af',af2,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(out)],check=True)
+    subprocess.run([_ffmpeg(),'-y','-v','warning','-i',str(nob),'-i',str(mix),'-map','0:v','-map','1:a','-c:v','copy','-af',af2,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(out)],check=True)
     # 焼き込んだ字幕の指紋を残す（あとで「字幕だけ直して焼き直していない」を中身で判定するため）
     srt=P(f'out/{SLUG}_subtitles.srt')
     if srt.exists():
@@ -683,18 +687,19 @@ def stage_build(chunk=1000,bgm_db=-6.0):
         }, ensure_ascii=False, indent=1), encoding='utf8')
     stage_qa()
 def stage_qa():
-    load_runtime();v=P(f'out/{SLUG}_video.mp4');r=subprocess.run(['ffprobe','-v','error','-show_entries','format=duration','-of','csv=p=0',str(v)],capture_output=True,text=True);dur=float(r.stdout.strip())
+    load_runtime();v=P(f'out/{SLUG}_video.mp4');r=subprocess.run([_ffprobe(),'-v','error','-show_entries','format=duration','-of','csv=p=0',str(v)],capture_output=True,text=True);dur=float(r.stdout.strip())
     assert abs(dur-TL[-1]['end'])<1.0,f'video {dur:.2f}s != timeline {TL[-1]["end"]:.2f}s'
-    dec=subprocess.run(['ffmpeg','-v','error','-i',str(v),'-f','null','-'],capture_output=True,text=True);assert not dec.stderr.strip(),dec.stderr[:300]
-    l=subprocess.run(['ffmpeg','-i',str(v),'-af','ebur128','-f','null','-'],capture_output=True,text=True,encoding='utf8',errors='replace').stderr
-    lufs=float(l.split('Integrated loudness:')[1].split('I:')[1].split('LUFS')[0]);bd=subprocess.run(['ffmpeg','-i',str(v),'-vf','blackdetect=d=0.5:pix_th=0.04','-an','-f','null','-'],capture_output=True,text=True,encoding='utf8',errors='replace').stderr
-    blk=re.findall(r'black_start:([\d.]+) black_end:([\d.]+)',bd);print(f'QA {SLUG}: {dur:.1f}s decode ok  {lufs:.1f} LUFS  black segments {blk}')
+    dec=subprocess.run([_ffmpeg(),'-v','error','-i',str(v),'-f','null','-'],capture_output=True,text=True);assert not dec.stderr.strip(),dec.stderr[:300]
+    lufs,_=yloud.measure_ebur128(v,ffmpeg=_ffmpeg())
+    blk=[(a,a+d) for a,d in yqa.black_spans(v,ffmpeg=_ffmpeg())]
+    lt=f'{lufs:.1f}' if lufs is not None else 'N/A'
+    print(f'QA {SLUG}: {dur:.1f}s decode ok  {lt} LUFS  black segments {blk}')
     # contact sheet: first sentence of every chapter + the last-but-one sentence
     pts=[]
     for c in TL:
         ss=[x for x in SEGS if x['scene']==c['id']];pts+= [ss[0]['start']+1.0, ss[len(ss)//2]['start']+1.0, ss[-1]['start']+1.0]
     d=P(f'out/{SLUG}_review');d.mkdir(exist_ok=True,parents=True)
-    for k,t in enumerate(pts):subprocess.run(['ffmpeg','-v','error','-y','-ss',f'{t:.2f}','-i',str(v),'-frames:v','1','-vf','scale=640:-1',str(d/f'f{k:02d}.png')])
+    for k,t in enumerate(pts):subprocess.run([_ffmpeg(),'-v','error','-y','-ss',f'{t:.2f}','-i',str(v),'-frames:v','1','-vf','scale=640:-1',str(d/f'f{k:02d}.png')])
     cols=3;rows=math.ceil(len(pts)/cols);per=12
     for s in range(0,len(pts),per):
         sub=list(range(s,min(s+per,len(pts))));W=Image.new('RGB',(1920,360*math.ceil(len(sub)/3)))
