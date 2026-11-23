@@ -605,20 +605,41 @@ def render_frame(i):
     d=ImageDraw.Draw(im);yb=1066 if SPEC.get('style')=='pop' else 1012;d.rectangle((48,yb,48+1824*(i+1)/N,yb+6),fill=(255,226,40) if SPEC.get('style')=='pop' else (201,173,112));return im
 def render_part(a,b):
     stills=[int(x) for x in os.environ['STILLS'].split(',')] if os.environ.get('STILLS') else None
-    out=P(f'cache/{SLUG}_part_{a}_{b}.mp4');(P('logs')).mkdir(exist_ok=True);log=P(f'logs/{SLUG}_enc_{a}.log').open('wb')
+    out = P(f'cache/{SLUG}_part_{a}_{b}.mp4')
+    P('logs').mkdir(exist_ok=True)
+    log = P(f'logs/{SLUG}_enc_{a}.log').open('wb')
+
     class _P:
         class stdin:
-            write=staticmethod(lambda b:None);close=staticmethod(lambda:None)
-        def wait(self):pass
-        returncode=0
-    proc=_P() if stills else subprocess.Popen([_ffmpeg(),'-y','-v','warning','-f','rawvideo','-pix_fmt','rgb24','-s','1920x1080','-r','30','-i','pipe:0','-an',*(['-c:v','libx264','-preset','veryfast','-crf','19'] if os.environ.get('VP_ENC')=='libx264' else ['-c:v','h264_nvenc','-preset','p4','-cq','19','-b:v','0']),'-pix_fmt','yuv420p',str(out)],stdin=subprocess.PIPE,stderr=log)
+            write = staticmethod(lambda b: None)
+            close = staticmethod(lambda: None)
+
+        def wait(self):
+            pass
+
+        returncode = 0
+
+    if stills:
+        proc = _P()
+    else:
+        codec = (['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '19']
+                 if os.environ.get('VP_ENC') == 'libx264'
+                 else ['-c:v', 'h264_nvenc', '-preset', 'p4', '-cq', '19', '-b:v', '0'])
+        cmd = [_ffmpeg(), '-y', '-v', 'warning', '-f', 'rawvideo', '-pix_fmt', 'rgb24',
+               '-s', '1920x1080', '-r', '30', '-i', 'pipe:0', '-an', *codec,
+               '-pix_fmt', 'yuv420p', str(out)]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=log)
     try:
-        for i in (stills or range(a,min(b,N))):
-            im=render_frame(i);proc.stdin.write(im.convert('RGB').tobytes())
-            if stills:im.convert('RGB').save(P(f'cache/{SLUG}_still_{i}.png'))
+        for i in (stills or range(a, min(b, N))):
+            im = render_frame(i)
+            proc.stdin.write(im.convert('RGB').tobytes())
+            if stills:
+                im.convert('RGB').save(P(f'cache/{SLUG}_still_{i}.png'))
     finally:
-        proc.stdin.close();proc.wait();log.close()
-    assert proc.returncode==0
+        proc.stdin.close()
+        proc.wait()
+        log.close()
+    assert proc.returncode == 0
 # ---------------------------------------------------------------- stages
 def stage_story():
     t=(theme_dir()/'09_script_v2.md').read_text(encoding='utf8');chs=re.split(r'\n## ',t)[1:];scenes=[];keys=[c['key'] for c in SPEC['chapters']]
@@ -715,41 +736,98 @@ def snap_bounds(seg,fr):
         out.append(t);prev=t
     return out
 def stage_audio():
-    requests,style=_vv();folder=P(f'cache/{SLUG}_audio');folder.mkdir(exist_ok=True,parents=True)
-    voice=SPEC.get('voice',{})
-    speed=float(voice.get('speed',SPEED));pre=float(voice.get('pre_phoneme',.15));post=float(voice.get('post_phoneme',.35));scene_hold=float(voice.get('scene_hold',1.6))
-    dic=load_dic();scenes=json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8'))
-    segs=[];timeline=[];cursor=0;allpcm=[];rate=24000
+    requests, style = _vv()
+    folder = P(f'cache/{SLUG}_audio')
+    folder.mkdir(exist_ok=True, parents=True)
+    voice = SPEC.get('voice', {})
+    speed = float(voice.get('speed', SPEED))
+    pre = float(voice.get('pre_phoneme', .15))
+    post = float(voice.get('post_phoneme', .35))
+    scene_hold = float(voice.get('scene_hold', 1.6))
+    dic = load_dic()
+    scenes = json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8'))
+    segs, timeline, cursor, allpcm, rate = [], [], 0, [], 24000
+
     for sc in scenes:
-        local=[];t=0
-        for i,text in enumerate(sentences(sc)):
-            spoken=vv.apply_pron(text,dic)
-            p=folder/f'{sc["id"]:02}_{i:02}.wav';key=hashlib.sha256((spoken+f'|{speed}|1.08|{pre}|{post}|'+str(style)).encode()).hexdigest();meta=p.with_suffix('.json')
-            if not p.exists() or not meta.exists() or json.loads(meta.read_text())['key']!=key:
-                q=requests.post(BASE+'/audio_query',params={'text':spoken,'speaker':style},timeout=120).json();q.update(speedScale=speed,intonationScale=1.08,prePhonemeLength=pre,postPhonemeLength=post,outputSamplingRate=24000)
-                r=requests.post(BASE+'/synthesis',params={'speaker':style},json=q,timeout=180);r.raise_for_status();p.write_bytes(r.content);meta.write_text(json.dumps({'key':key}),encoding='utf8')
-            pcm,rate=readwav(p);dur=len(pcm)/rate;rms=float(np.sqrt(np.mean((pcm.astype(float)/32768)**2)));peak=float(np.abs(pcm).max()/32768)
-            ch0=split_clauses(thin(display(text)));tot0=sum(len(c) for c in ch0);cum0=0;fr0=[]
-            for c in ch0:fr0.append(cum0/tot0);cum0+=len(c)
-            fr0.append(1.0);ct=_cue_times(pcm,rate,cursor+t,dur,fr0);env0,hop0=_env(pcm,rate)
-            assert dur>.4 and rms>.003 and peak<.999,(sc['key'],i,dur,rms,peak)
-            segs.append(dict(scene=sc['id'],text=text,spoken=spoken,start=round(cursor+t,4),end=round(cursor+t+dur,4),duration=dur,rms=rms,peak=peak,cue_times=ct,pauses=[round(cursor+t+x,4) for x in _silence_centers(env0,hop0,rate,dur)]));local.append(pcm);t+=dur
-        sd=math.ceil((t+scene_hold)*30)/30;j=np.concatenate(local);j=np.pad(j,(0,round(sd*rate)-len(j)));allpcm.append(j)
-        timeline.append({**sc,'start':cursor,'duration':sd,'end':cursor+sd});cursor+=sd
-    writewav(P(f'out/{SLUG}_narration.wav'),np.concatenate(allpcm),rate)
-    cues=[];rep=[]
+        local, t = [], 0
+        for i, text in enumerate(sentences(sc)):
+            spoken = vv.apply_pron(text, dic)
+            p = folder / f'{sc["id"]:02}_{i:02}.wav'
+            key = hashlib.sha256((spoken + f'|{speed}|1.08|{pre}|{post}|' + str(style)).encode()).hexdigest()
+            meta = p.with_suffix('.json')
+            if not p.exists() or not meta.exists() or json.loads(meta.read_text())['key'] != key:
+                q = requests.post(BASE + '/audio_query', params={'text': spoken, 'speaker': style},
+                                  timeout=120).json()
+                q.update(speedScale=speed, intonationScale=1.08, prePhonemeLength=pre,
+                         postPhonemeLength=post, outputSamplingRate=24000)
+                r = requests.post(BASE + '/synthesis', params={'speaker': style}, json=q, timeout=180)
+                r.raise_for_status()
+                p.write_bytes(r.content)
+                meta.write_text(json.dumps({'key': key}), encoding='utf8')
+            pcm, rate = readwav(p)
+            dur = len(pcm) / rate
+            rms = float(np.sqrt(np.mean((pcm.astype(float) / 32768) ** 2)))
+            peak = float(np.abs(pcm).max() / 32768)
+            ch0 = split_clauses(thin(display(text)))
+            tot0 = sum(len(c) for c in ch0)
+            cum0, fr0 = 0, []
+            for c in ch0:
+                fr0.append(cum0 / tot0)
+                cum0 += len(c)
+            fr0.append(1.0)
+            ct = _cue_times(pcm, rate, cursor + t, dur, fr0)
+            env0, hop0 = _env(pcm, rate)
+            assert dur > .4 and rms > .003 and peak < .999, (sc['key'], i, dur, rms, peak)
+            segs.append(dict(
+                scene=sc['id'], text=text, spoken=spoken,
+                start=round(cursor + t, 4), end=round(cursor + t + dur, 4),
+                duration=dur, rms=rms, peak=peak, cue_times=ct,
+                pauses=[round(cursor + t + x, 4) for x in _silence_centers(env0, hop0, rate, dur)],
+            ))
+            local.append(pcm)
+            t += dur
+        sd = math.ceil((t + scene_hold) * 30) / 30
+        j = np.concatenate(local)
+        j = np.pad(j, (0, round(sd * rate) - len(j)))
+        allpcm.append(j)
+        timeline.append({**sc, 'start': cursor, 'duration': sd, 'end': cursor + sd})
+        cursor += sd
+    writewav(P(f'out/{SLUG}_narration.wav'), np.concatenate(allpcm), rate)
+
+    cues, rep = [], []
     for x in segs:
-        ch=split_clauses(thin(display(x['text'])));tot=sum(len(c) for c in ch);cum=0;fr=[]
-        for c in ch:fr.append(cum/tot);cum+=len(c)
-        fr.append(1.0);nom=[x['start']+(x['end']-x['start'])*f for f in fr]
-        ct=x.get('cue_times');ts=ct if ct and len(ct)==len(ch)+1 else snap_bounds(x,fr)
-        rep.append(dict(start=x['start'],end=x['end'],n=len(ch),snapped=sum(1 for a,b in zip(nom,ts) if abs(a-b)>1e-6),max_shift=round(max([abs(a-b) for a,b in zip(nom,ts)]),4),pauses=len(x.get('pauses') or [])))
-        for i,c in enumerate(ch):cues.append((ts[i],ts[i+1],c))
-    write_srt(P(f'out/{SLUG}_subtitles.srt'),cues)
-    P(f'out/{SLUG}_subtitle_timing.json').write_text(json.dumps(dict(tol=SNAP_TOL,min_cue=MIN_CUE,max_shift=max([r['max_shift'] for r in rep] or [0]),snapped=sum(r['snapped'] for r in rep),segments=rep),ensure_ascii=False,indent=1),encoding='utf8')
-    P(f'data/{SLUG}_timeline.json').write_text(json.dumps(timeline,ensure_ascii=False,indent=1),encoding='utf8')
-    P(f'out/{SLUG}_audio_report.json').write_text(json.dumps(dict(engine=requests.get(BASE+'/version').json(),speaker=VOICE['label'],style=style,voice_tuning=dict(speed=speed,pre_phoneme=pre,post_phoneme=post,scene_hold=scene_hold),segments=segs,total_seconds=cursor,all_lines_voiced=True,semantic_asr_verified=False),ensure_ascii=False,indent=1),encoding='utf8')
-    print('total',round(cursor,1),'s',int(cursor//60),'min',int(cursor%60),'s')
+        ch = split_clauses(thin(display(x['text'])))
+        tot = sum(len(c) for c in ch)
+        cum, fr = 0, []
+        for c in ch:
+            fr.append(cum / tot)
+            cum += len(c)
+        fr.append(1.0)
+        nom = [x['start'] + (x['end'] - x['start']) * f for f in fr]
+        ct = x.get('cue_times')
+        ts = ct if ct and len(ct) == len(ch) + 1 else snap_bounds(x, fr)
+        rep.append(dict(
+            start=x['start'], end=x['end'], n=len(ch),
+            snapped=sum(1 for a, b in zip(nom, ts) if abs(a - b) > 1e-6),
+            max_shift=round(max([abs(a - b) for a, b in zip(nom, ts)]), 4),
+            pauses=len(x.get('pauses') or []),
+        ))
+        for i, c in enumerate(ch):
+            cues.append((ts[i], ts[i + 1], c))
+    write_srt(P(f'out/{SLUG}_subtitles.srt'), cues)
+    P(f'out/{SLUG}_subtitle_timing.json').write_text(json.dumps(dict(
+        tol=SNAP_TOL, min_cue=MIN_CUE,
+        max_shift=max([r['max_shift'] for r in rep] or [0]),
+        snapped=sum(r['snapped'] for r in rep), segments=rep,
+    ), ensure_ascii=False, indent=1), encoding='utf8')
+    P(f'data/{SLUG}_timeline.json').write_text(json.dumps(timeline, ensure_ascii=False, indent=1), encoding='utf8')
+    P(f'out/{SLUG}_audio_report.json').write_text(json.dumps(dict(
+        engine=requests.get(BASE + '/version').json(),
+        speaker=VOICE['label'], style=style,
+        voice_tuning=dict(speed=speed, pre_phoneme=pre, post_phoneme=post, scene_hold=scene_hold),
+        segments=segs, total_seconds=cursor, all_lines_voiced=True, semantic_asr_verified=False,
+    ), ensure_ascii=False, indent=1), encoding='utf8')
+    print('total', round(cursor, 1), 's', int(cursor // 60), 'min', int(cursor % 60), 's')
 def stage_bgm():
     SR=48000;D=P(BGM['dir']);tl=json.loads(P(f'data/{SLUG}_timeline.json').read_text(encoding='utf8'));T={c['key']:c for c in tl};TOTAL=tl[-1]['end'];XF=3.0;TARGET=-24.0
     def load_(name):
