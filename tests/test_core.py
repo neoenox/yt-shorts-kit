@@ -72,6 +72,13 @@ def test_display_converts_quantities_but_keeps_idioms():
     assert hn_text.display('一騎当千と三日月') == '一騎当千と三日月'
     assert hn_text.display('八千代市と三千院、百舌鳥。') == '八千代市と三千院、百舌鳥。'
     assert hn_text.display('数十人') == '数十人'
+    # 一〇〇万 のような 〇 を含む位取りは、0 ではなく 100万 にする
+    assert hn_text.display('一〇〇万人が見た') == '100万人が見た'
+    assert hn_text.big('一〇〇万') == '100万'
+    assert hn_text.k2i('二〇二六') == 2026
+    # 慣用句の退避に PUA を使わない（フォントの豆腐化を防ぐ）
+    out = hn_text.display('不十分と十分な準備')
+    assert not any(0xe000 <= ord(c) <= 0xf8ff or 0xf0000 <= ord(c) <= 0xffffd for c in out)
 
 
 def test_thin_keeps_conjunction_and_long_clauses():
