@@ -757,48 +757,117 @@ def stage_pack():
     import make_upload_pack as M
     vid=P(f'out/{SLUG}_video.mp4');srt=P(f'out/{SLUG}_subtitles.srt');assert vid.stat().st_mtime>=srt.stat().st_mtime-1,f'{vid.name} is older than the subtitles (stale build?) - rebuild before pack'
     name=SPEC['pack'];M.build(name,dict(video=f'out/{SLUG}_video.mp4',thumb=f'out/{SLUG}_thumbnail.jpg',srt=f'out/{SLUG}_subtitles.srt',desc=f'out/{SLUG}_description.md',title_no=SPEC['desc'].get('title_no',1)))
-if __name__=='__main__':
-    slug,cmd=sys.argv[1],sys.argv[2];load_spec(slug)
-    if cmd in ('build','audio','prep'):
-        from ytcore import vp_lock;vp_lock.acquire(ROOT,slug,cmd)   # 二重起動を防ぐ
-    if cmd=='part':load_runtime();render_part(int(sys.argv[3]),int(sys.argv[4]))
-    elif cmd=='story':stage_story()
-    elif cmd=='still':
-        load_runtime();d=P(f'out/{SLUG}_review');d.mkdir(parents=True,exist_ok=True)
-        for a in sys.argv[3:]:render_frame(int(float(a)*30)).convert('RGB').save(d/f'still_{a}.png')
-        print('stills',sys.argv[3:])
-    elif cmd=='ends':
-        load_runtime()
-        for c in TL:
-            ss=[x for x in SEGS if x['scene']==c['id']];print(c['key'],[round(x['start']+0.8,1) for x in ss])
-    elif cmd=='lint':
-        from ytcore import script_lint;raise SystemExit(script_lint.run(globals()))
-    elif cmd=='prep':   # 台本→読み→音声→BGM→検査まで一括（描画の前の準備。止まる所があれば、そこで止まる）
-        from ytcore import vp_check,script_lint
-        stage_story();script_lint.run(globals());stage_kana();stage_audio();stage_bgm()
-        raise SystemExit(vp_check.run(globals()))
-    elif cmd=='preview':
-        load_runtime();from ytcore import vp_preview;raise SystemExit(vp_preview.run(globals()))
-    elif cmd=='pvpart':
-        load_runtime();from ytcore import vp_preview;vp_preview.worker(globals(),sys.argv[3])
-    elif cmd=='check':
-        from ytcore import vp_check;raise SystemExit(vp_check.run(globals()))
-    elif cmd=='sents':
-        for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
-            print(f"--- {s['id']} {s['key']}")
-            for i,x in enumerate(sentences(s)):print(f'  {i}: {x[:60]}')
-    elif cmd=='kana':stage_kana()
-    elif cmd=='audio':stage_audio()
-    elif cmd=='bgm':stage_bgm()
-    elif cmd=='refp':   # 既存の部品に、いまの指紋を付け直す（部品が、いまの spec・音声・描画コードで作られたと分かっているときだけ）
-        load_runtime();ch=int(os.environ.get('VP_CHUNK',1000));cf=_code_fp();n_=0
-        for a in range(0,N,ch):
-            mp=P(f'cache/{SLUG}_part_{a}_{a+ch}.mp4')
-            if mp.exists() and mp.stat().st_size>0:P(f'cache/{SLUG}_part_{a}_{a+ch}.fp').write_text(_part_fp(a,min(a+ch,N),cf),encoding='utf8');n_+=1
-        print('re-stamped',n_,'parts')
-    elif cmd=='build':stage_build()
-    elif cmd=='qa':stage_qa()
-    elif cmd=='desc':stage_desc()
-    elif cmd=='thumb':stage_thumb()
-    elif cmd=='pack':stage_pack()
-    else:raise SystemExit('unknown command')
+# ---------------------------------------------------------------- CLI
+def _cmd_part(args):
+    load_runtime()
+    render_part(int(args[0]), int(args[1]))
+
+
+def _cmd_still(args):
+    load_runtime()
+    d = P(f'out/{SLUG}_review')
+    d.mkdir(parents=True, exist_ok=True)
+    for a in args:
+        render_frame(int(float(a) * 30)).convert('RGB').save(d / f'still_{a}.png')
+    print('stills', args)
+
+
+def _cmd_ends(args):
+    load_runtime()
+    for c in TL:
+        ss = [x for x in SEGS if x['scene'] == c['id']]
+        print(c['key'], [round(x['start'] + 0.8, 1) for x in ss])
+
+
+def _cmd_lint(args):
+    from ytcore import script_lint
+    raise SystemExit(script_lint.run(globals()))
+
+
+def _cmd_prep(args):
+    """台本→読み→音声→BGM→検査まで一括（描画の前の準備。止まる所があれば、そこで止まる）。"""
+    from ytcore import vp_check, script_lint
+    stage_story()
+    script_lint.run(globals())
+    stage_kana()
+    stage_audio()
+    stage_bgm()
+    raise SystemExit(vp_check.run(globals()))
+
+
+def _cmd_preview(args):
+    load_runtime()
+    from ytcore import vp_preview
+    raise SystemExit(vp_preview.run(globals()))
+
+
+def _cmd_pvpart(args):
+    load_runtime()
+    from ytcore import vp_preview
+    vp_preview.worker(globals(), args[0])
+
+
+def _cmd_check(args):
+    from ytcore import vp_check
+    raise SystemExit(vp_check.run(globals()))
+
+
+def _cmd_sents(args):
+    for s in json.loads(P(f'data/{SLUG}_scenes.json').read_text(encoding='utf8')):
+        print(f"--- {s['id']} {s['key']}")
+        for i, x in enumerate(sentences(s)):
+            print(f'  {i}: {x[:60]}')
+
+
+def _cmd_refp(args):
+    """既存の部品に、いまの指紋を付け直す（部品が、いまの spec・音声・描画コードで作られたと分かっているときだけ）。"""
+    load_runtime()
+    ch = int(os.environ.get('VP_CHUNK', 1000))
+    cf = _code_fp()
+    n_ = 0
+    for a in range(0, N, ch):
+        mp = P(f'cache/{SLUG}_part_{a}_{a+ch}.mp4')
+        if mp.exists() and mp.stat().st_size > 0:
+            P(f'cache/{SLUG}_part_{a}_{a+ch}.fp').write_text(_part_fp(a, min(a + ch, N), cf), encoding='utf8')
+            n_ += 1
+    print('re-stamped', n_, 'parts')
+
+
+COMMANDS = {
+    'part': _cmd_part,
+    'story': lambda args: stage_story(),
+    'still': _cmd_still,
+    'ends': _cmd_ends,
+    'lint': _cmd_lint,
+    'prep': _cmd_prep,
+    'preview': _cmd_preview,
+    'pvpart': _cmd_pvpart,
+    'check': _cmd_check,
+    'sents': _cmd_sents,
+    'kana': lambda args: stage_kana(),
+    'audio': lambda args: stage_audio(),
+    'bgm': lambda args: stage_bgm(),
+    'refp': _cmd_refp,
+    'build': lambda args: stage_build(),
+    'qa': lambda args: stage_qa(),
+    'desc': lambda args: stage_desc(),
+    'thumb': lambda args: stage_thumb(),
+    'pack': lambda args: stage_pack(),
+}
+LOCKED = ('build', 'audio', 'prep')
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    slug, cmd = args[0], args[1]
+    load_spec(slug)
+    if cmd in LOCKED:
+        from ytcore import vp_lock
+        vp_lock.acquire(ROOT, slug, cmd)   # 二重起動を防ぐ
+    if cmd not in COMMANDS:
+        raise SystemExit('unknown command')
+    return COMMANDS[cmd](args[2:])
+
+
+if __name__ == '__main__':
+    main()
