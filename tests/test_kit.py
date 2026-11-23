@@ -171,7 +171,7 @@ def test_find_ffprobe_uses_sibling_then_default(tmp_path, monkeypatch):
 def test_freevideo_quality_profiles():
     balanced = freevideo.graph('a', 544, 960, 5, seed=1)['1']['inputs']
     assert (balanced['two_pass'], balanced['base_steps'], balanced['refine_steps'],
-            balanced['upscale_factor']) == (True, 8, 3, '2')
+            balanced['upscale_factor']) == (True, 8, 1, '2')
 
     fast = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast')['1']['inputs']
     assert (fast['two_pass'], fast['base_steps']) == (False, 6)

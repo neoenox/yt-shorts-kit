@@ -36,7 +36,7 @@ def post(path, body, base=None, timeout=60):
 # 生成コストのプロファイル。テロップの背後など、細部が見えない背景向け。
 # fast / fastest は refine パスを丸ごと省き、ステップ数とアップスケールも下げる。
 QUALITY = {
-    'balanced': dict(two_pass=True, base_steps=8, refine_steps=3, upscale_factor='2'),
+    'balanced': dict(two_pass=True, base_steps=8, refine_steps=1, upscale_factor='2'),
     'fast': dict(two_pass=False, base_steps=6),
     'fastest': dict(two_pass=False, base_steps=4),
 }
@@ -46,12 +46,13 @@ def graph(text, width, height, seconds, seed=None, quality='balanced', **overrid
     """FreeVideoGenerate + FreeVideoMedia の2ノード。
 
     quality:
-      balanced … 従来どおり two_pass 8+3 ステップ、2倍アップスケール。
+      balanced … two_pass 8+1 ステップ、2倍アップスケール。
       fast     … 一パス 6 ステップ（refine とアップスケールなし）。
       fastest  … 一パス 4 ステップ。
 
-    同じプロンプト/seed/384x672/1.625秒で実測したサンプリング時間:
-      balanced 209.8s / fast 96.7s (-54%) / fastest 65.4s (-69%)。
+    同じプロンプト/seed/544x960/5秒で実測したサンプリング時間:
+      balanced(refine=3) 207.4s / refine=2 192.9s (-7%) / refine=1 186.8s (-10%)。
+    画質は refine=3 と 1 でほぼ差が無かったため、balanced は refine=1 を採用。
     two_pass を切ると base_steps だけの一パス生成になる（ノード側の仕様）。
     overrides で base_steps など個別の値を上書きできる（例: base_steps=5）。
     """
