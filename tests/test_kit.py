@@ -112,6 +112,7 @@ def test_voicevox_url_from_env(monkeypatch):
 # ---- ffmpeg_tools
 
 def test_find_ffmpeg_order(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
     a, b, c = (tmp_path / n for n in ('a.exe', 'b.exe', 'c.exe'))
     for f in (a, b, c):
         f.write_text('x')
@@ -123,7 +124,29 @@ def test_find_ffmpeg_order(tmp_path, monkeypatch):
     assert ffmpeg_tools.find_ffmpeg(prefer=[str(b)]) == str(a)
 
 
+def test_find_ffmpeg_is_cached_until_cleared(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
+    ff = tmp_path / 'ffmpeg.exe'
+    ff.write_text('x')
+    calls = []
+
+    def fake_which(name):
+        calls.append(name)
+        return str(ff) if name == 'ffmpeg' else None
+
+    monkeypatch.setattr(ffmpeg_tools.shutil, 'which', fake_which)
+    monkeypatch.delenv('FFMPEG', raising=False)
+    assert ffmpeg_tools.find_ffmpeg() == str(ff)
+    assert ffmpeg_tools.find_ffmpeg() == str(ff)
+    assert calls == ['ffmpeg']   # 2回目はキャッシュから返る
+
+    ffmpeg_tools.clear_cache()
+    ffmpeg_tools.find_ffmpeg()
+    assert calls == ['ffmpeg', 'ffmpeg']
+
+
 def test_find_ffmpeg_not_found(monkeypatch):
+    ffmpeg_tools.clear_cache()
     monkeypatch.delenv('FFMPEG', raising=False)
     monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
     with pytest.raises(ffmpeg_tools.FFmpegNotFound):
@@ -131,12 +154,14 @@ def test_find_ffmpeg_not_found(monkeypatch):
 
 
 def test_find_ffprobe_uses_sibling_then_default(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
     monkeypatch.delenv('FFPROBE', raising=False)
     monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
     ff = tmp_path / 'ffmpeg.exe'
     ff.write_text('x')
     assert ffmpeg_tools.find_ffprobe(str(ff), default=str(ff)) == str(ff)
     (tmp_path / 'ffprobe.exe').write_text('x')
+    ffmpeg_tools.clear_cache()   # ファイルが出来たので探索をやり直す
     assert ffmpeg_tools.find_ffprobe(str(ff)) == str(tmp_path / 'ffprobe.exe')
     assert ffmpeg_tools.find_ffprobe(None, default='ffprobe') == 'ffprobe'
 
