@@ -7,38 +7,99 @@ Scene item types (all optional 'at' = sentence index at which the item appears, 
   stack, panel, image, timeline, chips, bars, table, cols2, big, flow
 """
 from pathlib import Path
-import json,subprocess,sys,math,os,re,hashlib,wave
+import hashlib
+import json
+import math
+import os
+import re
+import subprocess
+import sys
+import wave
+
 import numpy as np
-from ytcore import hn_text,thin_commas,rich_text as rich
+from PIL import Image, ImageDraw, ImageFont
+
+from ytcore import hn_text, thin_commas, rich_text as rich
 from ytcore.hn_text import display
-from ytcore.thin_commas import thin
 from ytcore.subtitles import write_srt
-from PIL import Image,ImageDraw,ImageFont
-from ytkit.project import project_root,load_config,section,require   # 共通部品
-from ytkit import voicevox as vv,loudness as yloud,qa as yqa
-from ytkit.ffmpeg_tools import find_ffmpeg,find_ffprobe
-ROOT=project_root(__file__);CFG=load_config(ROOT)   # チャンネル設定 ROOT/channel.toml（環境変数 YT_PROJECT_ROOT でプロジェクトの場所を変えられる）
-CH=section(CFG,'channel',('about','terms_check'));VOICE=section(CFG,'voice',('speaker','style','speed','label','credit_long'));BGM=section(CFG,'bgm',('dir','pattern','credit_long'));BGM_NAMES=require(CFG,'bgm.names');FONTS=section(CFG,'fonts',('dir','sans','serif'))
-FD=FONTS['dir'];BASE=vv.base_url();SPEED=VOICE['speed']   # VOICEVOX_URL は ytkit.voicevox が読む
-PLUGIN_DIR=ROOT/require(CFG,'project.plugin_dir');sys.path.insert(0,str(PLUGIN_DIR))   # プロジェクト側のプラグイン（vp_anim*・make_upload_pack・ffmpeg_skill_check）を import できるように。置き場所は channel.toml の [project] plugin_dir
-XFADE=0.35  # 章の切れ目のクロスフェード（秒）
-BG=(7,24,36,240);GOLD=(239,201,118);WHITE=(245,243,232);DIM=(190,205,208);EDGE=(176,153,100);NAVY=(9,22,34);ORG=(255,150,90);BLUE=(120,190,255);VIO=(170,135,255);GRN=(120,210,150);RED=(235,90,80)
-COL={'gold':GOLD,'white':WHITE,'dim':DIM,'org':ORG,'blue':BLUE,'vio':VIO,'grn':GRN,'red':RED}
-SPEC_F={'sans':(FONTS['sans'],560),'sub':(FONTS['sans'],640),'serif':(FONTS['serif'],800)}
-_FC={}
-def vfont(kind,size):
-    k=(kind,size)
+from ytcore.thin_commas import thin
+from ytkit import loudness as yloud, qa as yqa, voicevox as vv
+from ytkit.ffmpeg_tools import find_ffmpeg, find_ffprobe
+from ytkit.project import load_config, project_root, require, section
+
+# チャンネル設定 ROOT/channel.toml（環境変数 YT_PROJECT_ROOT でプロジェクトの場所を変えられる）
+ROOT = project_root(__file__)
+CFG = load_config(ROOT)
+CH = section(CFG, 'channel', ('about', 'terms_check'))
+VOICE = section(CFG, 'voice', ('speaker', 'style', 'speed', 'label', 'credit_long'))
+BGM = section(CFG, 'bgm', ('dir', 'pattern', 'credit_long'))
+BGM_NAMES = require(CFG, 'bgm.names')
+FONTS = section(CFG, 'fonts', ('dir', 'sans', 'serif'))
+
+FD = FONTS['dir']
+BASE = vv.base_url()
+SPEED = VOICE['speed']   # VOICEVOX_URL は ytkit.voicevox が読む
+# プロジェクト側のプラグイン（vp_anim*・make_upload_pack・ffmpeg_skill_check）を import できるように。
+# 置き場所は channel.toml の [project] plugin_dir。
+PLUGIN_DIR = ROOT / require(CFG, 'project.plugin_dir')
+sys.path.insert(0, str(PLUGIN_DIR))
+
+XFADE = 0.35   # 章の切れ目のクロスフェード（秒）
+BG = (7, 24, 36, 240)
+GOLD = (239, 201, 118)
+WHITE = (245, 243, 232)
+DIM = (190, 205, 208)
+EDGE = (176, 153, 100)
+NAVY = (9, 22, 34)
+ORG = (255, 150, 90)
+BLUE = (120, 190, 255)
+VIO = (170, 135, 255)
+GRN = (120, 210, 150)
+RED = (235, 90, 80)
+COL = {'gold': GOLD, 'white': WHITE, 'dim': DIM, 'org': ORG,
+       'blue': BLUE, 'vio': VIO, 'grn': GRN, 'red': RED}
+SPEC_F = {'sans': (FONTS['sans'], 560), 'sub': (FONTS['sans'], 640), 'serif': (FONTS['serif'], 800)}
+
+
+_FC = {}
+def vfont(kind, size):
+    k = (kind, size)
     if k not in _FC:
-        f=ImageFont.truetype(FONTS['dir']+SPEC_F[kind][0],size);f.set_variation_by_axes([SPEC_F[kind][1]]);_FC[k]=f
+        f = ImageFont.truetype(FONTS['dir'] + SPEC_F[kind][0], size)
+        f.set_variation_by_axes([SPEC_F[kind][1]])
+        _FC[k] = f
     return _FC[k]
+
+
 class _Fam:
-    def __init__(s,kind):s.kind=kind
-    def __getitem__(s,n):return vfont(s.kind,n)
-F=_Fam('sans');FB=_Fam('serif');FSUB=_Fam('sub')
-SLUG=None;SPEC=None;TL=None;SEGS=None;N=0;KEYS=[]
-def P(rel):return ROOT/rel
-def _ffmpeg():return find_ffmpeg()
-def _ffprobe():return find_ffprobe(find_ffmpeg(),default='ffprobe')
+    def __init__(s, kind):
+        s.kind = kind
+
+    def __getitem__(s, n):
+        return vfont(s.kind, n)
+
+
+F = _Fam('sans')
+FB = _Fam('serif')
+FSUB = _Fam('sub')
+SLUG = None
+SPEC = None
+TL = None
+SEGS = None
+N = 0
+KEYS = []
+
+
+def P(rel):
+    return ROOT / rel
+
+
+def _ffmpeg():
+    return find_ffmpeg()
+
+
+def _ffprobe():
+    return find_ffprobe(find_ffmpeg(), default='ffprobe')
 # 画面に出す文字は、数量・回数・順序を算用数字にする（字幕と同じ規則。慣用句は hn_text.KEEP で保護）
 _TXT={'text','title','sub','chapter_title','opener','cells','lines'}
 def _cv(v):
