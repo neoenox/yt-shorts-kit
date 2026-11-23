@@ -168,6 +168,25 @@ def test_find_ffprobe_uses_sibling_then_default(tmp_path, monkeypatch):
 
 # ---- freevideo
 
+def test_freevideo_quality_profiles():
+    balanced = freevideo.graph('a', 544, 960, 5, seed=1)['1']['inputs']
+    assert (balanced['two_pass'], balanced['base_steps'], balanced['refine_steps'],
+            balanced['upscale_factor']) == (True, 8, 3, '2')
+
+    fast = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast')['1']['inputs']
+    assert (fast['two_pass'], fast['base_steps'], fast['upscale_factor']) == (False, 6, '1')
+    assert 'refine_steps' not in fast
+
+    fastest = freevideo.graph('a', 544, 960, 5, seed=1, quality='fastest')['1']['inputs']
+    assert fastest['base_steps'] == 4
+    assert 'refine_steps' not in fastest
+
+    custom = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast', base_steps=3)
+    assert custom['1']['inputs']['base_steps'] == 3
+    with pytest.raises(ValueError, match='未知の quality'):
+        freevideo.graph('a', 544, 960, 5, quality='ultra')
+
+
 def test_freevideo_graph_and_video_of(tmp_path):
     g = freevideo.graph('a scene', 544, 960, 7, seed=5)
     inp = g['1']['inputs']

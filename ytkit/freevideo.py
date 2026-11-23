@@ -33,18 +33,44 @@ def post(path, body, base=None, timeout=60):
     return json.loads(raw) if raw.strip() else {}
 
 
-def graph(text, width, height, seconds, seed=None):
-    """FreeVideoGenerate + FreeVideoMedia の2ノード（既定は two_pass・8+3 ステップ）。"""
+# 生成コストのプロファイル。テロップの背後など、細部が見えない背景向け。
+# fast / fastest は refine パスを丸ごと省き、ステップ数とアップスケールも下げる。
+QUALITY = {
+    'balanced': dict(two_pass=True, base_steps=8, refine_steps=3, upscale_factor='2'),
+    'fast': dict(two_pass=False, base_steps=6, upscale_factor='1'),
+    'fastest': dict(two_pass=False, base_steps=4, upscale_factor='1'),
+}
+
+
+def graph(text, width, height, seconds, seed=None, quality='balanced', **overrides):
+    """FreeVideoGenerate + FreeVideoMedia の2ノード。
+
+    quality:
+      balanced … 従来どおり two_pass 8+3 ステップ、2倍アップスケール。
+      fast     … refine を省略、6 ステップ、アップスケールなし。
+      fastest  … refine を省略、4 ステップ、アップスケールなし。
+    overrides で base_steps など個別の値を上書きできる（例: base_steps=5）。
+    """
+    try:
+        profile = QUALITY[quality]
+    except KeyError:
+        raise ValueError(f'未知の quality: {quality}（{", ".join(QUALITY)}）') from None
+    opts = {**profile, **overrides}
+    inputs = dict(
+        text=text, width=width, height=height, seconds=float(seconds),
+        seed=seed if seed is not None else random.randint(1, 2 ** 48),
+        force_regenerate=False, preview=False,
+        refine_from='', continue_from='', frames=0,
+        first_frame_reference=False, voice_reference=False, hide_tail=False,
+        step_cache='none', allow_empty_prompt=False,
+        media=['2', 0],
+    )
+    inputs.update(opts)
+    if not inputs.get('two_pass'):
+        # refine パスを使わないときは、ComfyUI に余計なノード引数を渡さない。
+        inputs.pop('refine_steps', None)
     return {
-        '1': {'class_type': 'FreeVideoGenerate', 'inputs': dict(
-            text=text, width=width, height=height, seconds=float(seconds),
-            seed=seed if seed is not None else random.randint(1, 2 ** 48),
-            two_pass=True, base_steps=8, refine_steps=3,
-            force_regenerate=False, preview=False,
-            refine_from='', continue_from='', frames=0,
-            first_frame_reference=False, voice_reference=False, hide_tail=False,
-            step_cache='none', upscale_factor='2', allow_empty_prompt=False,
-            media=['2', 0])},
+        '1': {'class_type': 'FreeVideoGenerate', 'inputs': inputs},
         '2': {'class_type': 'FreeVideoMedia', 'inputs': {'assets': '[]', 'audio_use': 'reference'}},
     }
 
