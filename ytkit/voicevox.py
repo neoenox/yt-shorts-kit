@@ -22,10 +22,12 @@ def speaker_id(name, style='ノーマル', base=None, timeout=30):
     sp = requests.get(base_url(base) + '/speakers', timeout=timeout).json()
     for s in sp:
         if s['name'] == name:
-            for st in s['styles']:
+            styles = s.get('styles') or []
+            for st in styles:
                 if st['name'] == style:
                     return st['id']
-            return s['styles'][0]['id']
+            if styles:
+                return styles[0]['id']
     raise SpeakerNotFound(name)
 
 
@@ -40,8 +42,10 @@ def synth(text, speaker, speed, intonation=1.0, pre=0.1, post=0.3, rate=24000,
           base=None, query_timeout=120, synth_timeout=180):
     """1文を合成して (wav のバイト列, VOICEVOX が返した読み kana) を返す。"""
     b = base_url(base)
-    q = requests.post(b + '/audio_query', params={'text': text, 'speaker': speaker},
-                      timeout=query_timeout).json()
+    query = requests.post(b + '/audio_query', params={'text': text, 'speaker': speaker},
+                          timeout=query_timeout)
+    query.raise_for_status()
+    q = query.json()
     q.update(speedScale=speed, intonationScale=intonation, prePhonemeLength=pre,
              postPhonemeLength=post, outputSamplingRate=rate)
     r = requests.post(b + '/synthesis', params={'speaker': speaker}, json=q, timeout=synth_timeout)

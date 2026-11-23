@@ -4,13 +4,14 @@
 サーバーはランチャーの「Launch FreeVideo」で起動しておく（既定 http://127.0.0.1:8188）。
 """
 import json
+import os
 import random
 import time
 import urllib.request
 from pathlib import Path
 
 DEFAULT_BASE = 'http://127.0.0.1:8188'
-DEFAULT_OUTPUT_ROOT = Path('E:/FreeVideo/runtime/ComfyUI/output')
+DEFAULT_OUTPUT_ROOT = Path(os.environ.get('FREEVIDEO_OUTPUT_ROOT', 'output'))
 
 
 def get(path, base=DEFAULT_BASE, timeout=30):

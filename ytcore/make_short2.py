@@ -1,14 +1,15 @@
 """汎用の縦型Short（1080x1920）。長尺のイラストを背景に、見出し→要点→最後に本動画への誘導。
 usage: python scripts/make_short2.py <slug>     # data/short_<slug>.json から out/short_<slug>.mp4, _subtitles.srt, _description.md
 spec: title, long_id, long_title, pron(JSON), hook, notes, art, scenes[{text,big,sub,src,art,col}]。最後の場面は end:true（本動画のタイトルと誘導を出す）。
-ナレーションの数字・限定は長尺の台本（docs/themes/*/09_script_v2.md）と一致させる。VOICEVOXが 127.0.0.1:50021 で動いていること。"""
+ナレーションの数字・限定は長尺の台本（docs/themes/*/09_script_v2.md）と一致させる。VOICEVOX は VOICEVOX_URL、ffmpeg は FFMPEG / PATH から探す。"""
 import json, subprocess, sys
-from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance
 from ytcore import make_short as M
-from ytcore.make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix
+from ytcore.make_short import ROOT, W, H, FPS, GOLD, WHITE, DIM, font, wrap, panel, synth, display, chunks, mix, encode_frames
 from ytcore.make_short import CH, VOICE, BGM, TAGS   # チャンネル設定（ROOT/channel.toml）。呼び出し時に引くので、書き換えると反映される
 from ytcore import rich_text as rich
+from ytkit.ffmpeg_tools import find_ffmpeg, find_ffprobe
+from ytcore.subtitles import write_srt
 
 COLS = M.COL
 _BG = {}
@@ -33,6 +34,21 @@ def bg(path, zoom, dim=0.55, fit=1.12):
 _VID = {}
 
 
+def _close_videos():
+    """動画背景の ffmpeg を全部回収する（場面ごとに1本起動している）。"""
+    for p in _VID.values():
+        try:
+            p.stdout.close()
+        except OSError:
+            pass
+        try:
+            p.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+    _VID.clear()
+
+
 def vid_frame(path, dim, fi_key, dur):
     """動画背景（AI生成クリップ）。ループも逆再生もせず、クリップ全体を場面の長さ dur 秒に合わせて再生速度を落とす（スロー）。
     動きの間は minterpolate で補間して滑らかにする。cover で 1080x1920 に切り出し、dim で暗くして、場面ごとに1フレームずつ読む。
@@ -40,12 +56,21 @@ def vid_frame(path, dim, fi_key, dur):
     key = (path, fi_key)
     if key not in _VID:
         src = ROOT / path
-        L = float(subprocess.check_output(['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration', '-of', 'csv=p=0', str(src)]).decode().split()[0])
+        probe = find_ffprobe(find_ffmpeg(), default='ffprobe')
+        L = float(subprocess.check_output([probe, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=duration', '-of', 'csv=p=0', str(src)]).decode().split()[0])
         f = max(1.0, (dur + 0.1) / L)   # 少し長めに伸ばし、最後の1フレームは tpad で保持（足りなくならないように）
         vf = (f'setpts={f:.4f}*PTS,minterpolate=fps={FPS}:mi_mode=mci:mc_mode=aobmc:vsbmc=1,tpad=stop_mode=clone:stop_duration=2,'
               f'scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},lutrgb=r=val*{dim}:g=val*{dim}:b=val*{dim}')
-        _VID[key] = subprocess.Popen(['ffmpeg', '-v', 'error', '-i', str(src), '-an', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], stdout=subprocess.PIPE)
+        _VID[key] = subprocess.Popen([find_ffmpeg(), '-v', 'error', '-i', str(src), '-an', '-vf', vf, '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'], stdout=subprocess.PIPE)
     buf = _VID[key].stdout.read(W * H * 3)
+    if len(buf) != W * H * 3:
+        p = _VID.pop(key)
+        try:
+            p.stdout.close()
+        except OSError:
+            pass
+        p.wait()
+        raise RuntimeError(f'動画背景クリップを読み切れませんでした: {path} (ffmpeg={p.returncode})')
     return Image.frombytes('RGB', (W, H), buf)
 
 
@@ -145,7 +170,7 @@ def draw_viz(im, sc, A, tt):
             wbar = max(40, int(900 * b['value'] / mx * a))
             d.rounded_rectangle((90, y + 40, 90 + wbar, y + 130), 14, fill=tuple(b.get('color', GOLD)) + (int(255 * A / 255),))
             d.text((90 + min(wbar, 900) - 16 if wbar > 360 else 90 + wbar + 16, y + 85), b['text'], font=font(46, True),
-                   fill=(WHITE if wbar > 360 else WHITE) + (int(255 * A / 255),), anchor='rm' if wbar > 360 else 'lm')
+                   fill=WHITE + (int(255 * A / 255),), anchor='rm' if wbar > 360 else 'lm')
             if b.get('note'):
                 d.text((90, y + 160), b['note'], font=font(32), fill=DIM + (int(255 * a * A / 255),), anchor='lm')
             y += stp
@@ -249,7 +274,7 @@ def _vid_still(path, dim):
     if key not in _VSTILL:
         vf = (f'scale={W}:{H}:force_original_aspect_ratio=increase:flags=lanczos,crop={W}:{H},'
               f'lutrgb=r=val*{dim}:g=val*{dim}:b=val*{dim}')
-        buf = subprocess.check_output(['ffmpeg', '-v', 'error', '-i', str(ROOT / path), '-an', '-frames:v', '1', '-vf', vf,
+        buf = subprocess.check_output([find_ffmpeg(), '-v', 'error', '-i', str(ROOT / path), '-an', '-frames:v', '1', '-vf', vf,
                                        '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'])
         _VSTILL[key] = Image.frombytes('RGB', (W, H), buf)
     return _VSTILL[key].copy()
@@ -300,14 +325,14 @@ def frame_at(spec, segs, cks, t, preview=False):
 def render(spec, segs, total, out_mp4, slug):
     n = round(total * FPS)
     cks = subtitle_chunks(segs)
-    st = lambda t: (lambda ms: f'{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}')(round(t * 1000))
-    (ROOT / 'out' / f'short_{slug}_subtitles.srt').write_text('\n\n'.join(f'{i + 1}\n{st(a)} --> {st(b)}\n{c}' for i, (a, b, c) in enumerate(cks)) + '\n', encoding='utf8')
-    proc = subprocess.Popen(['ffmpeg', '-y', '-v', 'warning', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(FPS), '-i', 'pipe:0',
-                             '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-pix_fmt', 'yuv420p', str(out_mp4)], stdin=subprocess.PIPE)
-    for fi in range(n):
-        im = frame_at(spec, segs, cks, fi / FPS)
-        proc.stdin.write(im.convert('RGB').tobytes())
-    proc.stdin.close(); proc.wait()
+    write_srt(ROOT / 'out' / f'short_{slug}_subtitles.srt', cks)
+    def frames():
+        for fi in range(n):
+            yield frame_at(spec, segs, cks, fi / FPS).convert('RGB').tobytes()
+    try:
+        encode_frames(out_mp4, frames(), preset='veryfast')
+    finally:
+        _close_videos()
 
 
 def description(spec):

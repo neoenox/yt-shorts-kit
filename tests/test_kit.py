@@ -1,6 +1,4 @@
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -133,7 +131,10 @@ def test_freevideo_graph_and_video_of(tmp_path):
 
 # ---- 実際の ffmpeg を使う検査（ffmpeg が無ければ飛ばす）
 
-FF = shutil.which('ffmpeg') or next((str(p) for p in [Path('E:/rekishikaisetu-honnoji/tools/ffmpeg/bin/ffmpeg.exe')] if p.exists()), None)
+try:
+    FF = ffmpeg_tools.find_ffmpeg()
+except ffmpeg_tools.FFmpegNotFound:
+    FF = None
 
 
 @pytest.mark.skipif(not FF, reason='ffmpeg が無い')
@@ -161,3 +162,26 @@ def test_measure_ebur128_on_silence_and_probe_duration(tmp_path):
         assert ffmpeg_tools.probe_duration(w, probe) == pytest.approx(2.0, abs=0.1)
     m = loudness.measure_loudnorm(w, FF, lra=7)
     assert m is not None and 'input_i' in m
+
+
+def test_probe_duration_without_probe_returns_none(tmp_path):
+    assert ffmpeg_tools.probe_duration(tmp_path / 'x.mp4', None) is None
+    assert ffmpeg_tools.probe_duration(tmp_path / 'x.mp4', str(tmp_path / 'no-such-probe')) is None
+
+
+def test_speaker_with_no_styles_raises_named_error(monkeypatch):
+    monkeypatch.setattr(voicevox.requests, 'get',
+                        lambda url, timeout: _Resp([{'name': 'X', 'styles': []}]))
+    with pytest.raises(voicevox.SpeakerNotFound):
+        voicevox.speaker_id('X')
+
+
+def test_freevideo_output_root_comes_from_env(monkeypatch):
+    monkeypatch.setenv('FREEVIDEO_OUTPUT_ROOT', 'E:/other/output')
+    import importlib
+    fv = importlib.reload(freevideo)
+    try:
+        assert fv.DEFAULT_OUTPUT_ROOT == Path('E:/other/output')
+    finally:
+        monkeypatch.delenv('FREEVIDEO_OUTPUT_ROOT')
+        importlib.reload(freevideo)

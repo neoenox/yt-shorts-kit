@@ -89,7 +89,6 @@ def run(V, k=3):
 
 
 def worker(V, jobfile):
-    import vp_anim_pop as PP
     P, slug = V['P'], V['SLUG']
     SPEC = V['SPEC']
     d = P(f'out/{slug}_pv')
@@ -97,6 +96,7 @@ def worker(V, jobfile):
     out = []
     pop = SPEC.get('style') == 'pop'
     if pop:
+        import vp_anim_pop as PP
         PP.bind(V)
     for j in jobs:
         ci, si, t = j['ci'], j['si'], j['t']

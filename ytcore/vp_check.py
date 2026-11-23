@@ -12,7 +12,6 @@ spec と台本（story のあと）だけを調べ、数秒で次を見つける
 終了コード：誤り（ERR）があれば 1。注意（WARN）だけなら 0。"""
 import json
 import sys
-from pathlib import Path
 
 
 def run(V, quiet=False):
@@ -41,9 +40,10 @@ def run(V, quiet=False):
             E(f'画像 {k}: crop が正しくない {c}')
     used = set()
 
+    plugin_dir = V.get('PLUGIN_DIR')
+    sys.path.insert(0, str(plugin_dir or P('scripts')))
     import vp_anim
     DRAW = vp_anim.DRAW
-    sys.path.insert(0, str(P('scripts')))
     import vp_anim_pop as PP
     PP.bind(V)
     from PIL import Image, ImageDraw
@@ -161,8 +161,11 @@ def run(V, quiet=False):
             E(f'bgm {b}: 章キー {a}/{c} が spec に無い')
         elif skeys.index(a) > skeys.index(c):
             E(f'bgm {b}: 開始が終了より後ろ')
-        if not (P('assets/bgm_maou') / f'maou_bgm_{name}.mp3').exists():
-            E(f'bgm {b}: 曲 assets/bgm_maou/maou_bgm_{name}.mp3 が無い')
+        bgm_cfg = V.get('BGM') or {}
+        bgm_dir = bgm_cfg.get('dir', 'assets/bgm_maou')
+        bgm_name = bgm_cfg.get('pattern', 'maou_bgm_{name}.mp3').format(name=name)
+        if not (P(bgm_dir) / bgm_name).exists():
+            E(f'bgm {b}: 曲 {bgm_dir}/{bgm_name} が無い')
     covered = set()
     for a, c, _ in SPEC.get('bgm', []):
         if a in skeys and c in skeys:

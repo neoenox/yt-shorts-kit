@@ -10,7 +10,7 @@ class FFmpegNotFound(RuntimeError):
 
 
 def _exists(c):
-    return bool(c) and Path(c).exists()
+    return bool(c) and Path(c).is_file()
 
 
 def find_ffmpeg(prefer=(), fallback=()):
@@ -46,8 +46,13 @@ def find_ffprobe(ffmpeg=None, prefer=(), default=None):
 
 def probe_duration(path, ffprobe='ffprobe'):
     """動画・音声の長さ（秒）。測れなければ None。"""
-    r = subprocess.run([ffprobe, '-v', 'error', '-show_entries', 'format=duration',
-                        '-of', 'csv=p=0', str(path)], capture_output=True, text=True)
+    if not ffprobe:
+        return None
+    try:
+        r = subprocess.run([ffprobe, '-v', 'error', '-show_entries', 'format=duration',
+                            '-of', 'csv=p=0', str(path)], capture_output=True, text=True)
+    except OSError:
+        return None
     try:
         return float(r.stdout.strip())
     except ValueError:
