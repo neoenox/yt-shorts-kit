@@ -276,8 +276,8 @@ def render(spec, segs, total, work, out_mp4, slug):
     cache = {}
     cks = []
     for s in segs:
-        cs = chunks(display(s['text']))
-        ws = [len(c) for c in cs]; tot = sum(ws); t0 = s['start']; dur = s['end'] - s['start']
+        cs = [c for c in chunks(display(s['text'])) if c.strip()] or ['']
+        ws = [len(c) or 1 for c in cs]; tot = sum(ws); t0 = s['start']; dur = s['end'] - s['start']
         for c, wgt in zip(cs, ws):
             cks.append((t0, t0 + dur * wgt / tot, c, s['i'])); t0 += dur * wgt / tot
     write_srt(ROOT / 'out' / f'short_{slug}_subtitles.srt', [(a, b, c) for a, b, c, _ in cks])

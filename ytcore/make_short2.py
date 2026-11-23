@@ -258,7 +258,9 @@ def subtitle_chunks(segs):
     """場面ごとの字幕を、句読点で区切った塊に分け、文字数で按分した (開始, 終了, 文字列) の並び。"""
     cks = []
     for s in segs:
-        cs = chunks(display(s['text'])); ws = [len(c) for c in cs]; tot = sum(ws); t0 = s['start']; dur = s['end'] - s['start']
+        cs = chunks(display(s['text']))
+        cs = [c for c in cs if sub_clean(c).strip()] or ['']
+        ws = [len(c) or 1 for c in cs]; tot = sum(ws); t0 = s['start']; dur = s['end'] - s['start']
         for c, w in zip(cs, ws):
             cks.append((t0, t0 + dur * w / tot, sub_clean(c))); t0 += dur * w / tot
     return cks

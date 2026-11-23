@@ -72,6 +72,13 @@ def test_display_converts_quantities_but_keeps_idioms():
     assert hn_text.display('一騎当千と三日月') == '一騎当千と三日月'
     assert hn_text.display('八千代市と三千院、百舌鳥。') == '八千代市と三千院、百舌鳥。'
     assert hn_text.display('数十人') == '数十人'
+    # 一〇〇万 のような 〇 を含む位取りは、0 ではなく 100万 にする
+    assert hn_text.display('一〇〇万人が見た') == '100万人が見た'
+    assert hn_text.big('一〇〇万') == '100万'
+    assert hn_text.k2i('二〇二六') == 2026
+    # 慣用句の退避に PUA を使わない（フォントの豆腐化を防ぐ）
+    out = hn_text.display('不十分と十分な準備')
+    assert not any(0xe000 <= ord(c) <= 0xf8ff or 0xf0000 <= ord(c) <= 0xffffd for c in out)
 
 
 def test_thin_keeps_conjunction_and_long_clauses():
@@ -85,6 +92,7 @@ def test_rich_text_splits_numbers_from_surrounding_text():
     assert rich_text.runs('約21時間（1,250分）') == [
         ('約', False), ('21時間', True), ('（', False), ('1,250分', True), ('）', False)]
     assert rich_text.runs('abc2026年x') == [('abc', False), ('2026年', True), ('x', False)]
+    assert rich_text.runs('1,250.5キロ') == [('1,250.5キロ', True)]
 
 
 # ---- 字幕の境界・場面の表示判定
@@ -112,6 +120,25 @@ def test_ctx_respects_at_and_until(vp, monkeypatch):
     assert cx.vis({'at': None, 'until': 0}) is False
 
 
+def test_vp_cli_rejects_missing_arguments(vp):
+    with pytest.raises(SystemExit, match='usage:'):
+        vp.main([])
+    with pytest.raises(SystemExit, match='usage:'):
+        vp.main(['slug'])
+    with pytest.raises(SystemExit, match='unknown command'):
+        vp.main(['slug', 'nope'])
+    with pytest.raises(SystemExit, match='part に引数が足りません'):
+        vp.main(['slug', 'part', '1'])
+
+
+def test_vp_cli_dispatches_known_command(vp, monkeypatch):
+    called = []
+    monkeypatch.setattr(vp, 'load_spec', lambda slug: called.append(('spec', slug)))
+    monkeypatch.setattr(vp, 'stage_desc', lambda: called.append('desc'))
+    vp.main(['slug', 'desc'])
+    assert called == [('spec', 'slug'), 'desc']
+
+
 def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
     measured = {'input_i': '-15.3', 'input_tp': '-1.4', 'input_lra': '4.2',
                 'input_thresh': '-25.6', 'target_offset': '0.3'}
@@ -130,17 +157,36 @@ def test_lock_alive_detects_current_process():
     assert not vp_lock.alive(-1)
 
 
+def test_lock_others_counts_prep_and_audio_as_builds(tmp_path, monkeypatch):
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    (cache / 'other1.lock').write_text(f'{os.getpid()} prep 12:00:00', encoding='utf8')
+    (cache / 'other2.lock').write_text(f'{os.getpid()} audio 12:00:00', encoding='utf8')
+    (cache / 'other3.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    (cache / 'self.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    assert vp_lock.others(tmp_path, 'self') == 3
+
+
 # ---- 字幕書き出し・映像エンコードの共有部品
 
 def test_srt_time_and_write_srt(tmp_path):
     assert subtitles.srt_time(0) == '00:00:00,000'
     assert subtitles.srt_time(61.5) == '00:01:01,500'
     assert subtitles.srt_time(3661.25) == '01:01:01,250'
+    assert subtitles.srt_time(-0.001) == '00:00:00,000'   # 負の時刻は SRT で無効
     out = tmp_path / 'test.srt'
     subtitles.write_srt(out, [(0, 1.5, '一行目'), (60, 61.5, '二行目')])
     assert out.read_text(encoding='utf8') == (
         '1\n00:00:00,000 --> 00:00:01,500\n一行目\n\n'
         '2\n00:01:00,000 --> 00:01:01,500\n二行目\n')
+
+
+def test_subtitle_chunks_handles_empty_text(vp):
+    m2 = importlib.import_module('ytcore.make_short2')
+    segs = [{'i': 0, 'text': '', 'start': 0.0, 'end': 2.0}]
+    cks = m2.subtitle_chunks(segs)
+    assert len(cks) == 1
+    assert cks[0][0] == 0.0 and cks[0][1] == 2.0
 
 
 def test_encode_frames_writes_frames_and_reports_failure(vp, monkeypatch, tmp_path):

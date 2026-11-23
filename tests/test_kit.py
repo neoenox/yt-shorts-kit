@@ -29,6 +29,30 @@ def test_loudnorm_filter_matches_rekishikaisetu_vp_two_pass():
     assert loudness.loudnorm_filter(M, -14, -1.5, 9) == old
 
 
+def test_measure_loudnorm_parses_real_ffmpeg_json_layout(monkeypatch):
+    """ffmpeg は { と \"input_i\" の間に改行とタブを入れる。移行前の正規表現はこれに不一致だった。"""
+    stderr = '''[Parsed_loudnorm_0 @ 00000183c23d6b40]
+{
+\t"input_i" : "-15.3",
+\t"input_tp" : "-1.4",
+\t"input_lra" : "4.2",
+\t"input_thresh" : "-25.6",
+\t"output_i" : "-14.0",
+\t"target_offset" : "0.3"
+}
+[out#0/null @ 00000183c0472800] video:0KiB audio:750KiB'''
+
+    class Result:
+        pass
+
+    result = Result()
+    result.stderr = stderr
+    monkeypatch.setattr(loudness.subprocess, 'run', lambda *a, **kw: result)
+    got = loudness.measure_loudnorm('x.wav')
+    assert got is not None
+    assert all(got[k] == v for k, v in M.items())
+
+
 # ---- voicevox
 
 def test_apply_pron_longest_key_first():
@@ -88,6 +112,7 @@ def test_voicevox_url_from_env(monkeypatch):
 # ---- ffmpeg_tools
 
 def test_find_ffmpeg_order(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
     a, b, c = (tmp_path / n for n in ('a.exe', 'b.exe', 'c.exe'))
     for f in (a, b, c):
         f.write_text('x')
@@ -99,7 +124,29 @@ def test_find_ffmpeg_order(tmp_path, monkeypatch):
     assert ffmpeg_tools.find_ffmpeg(prefer=[str(b)]) == str(a)
 
 
+def test_find_ffmpeg_is_cached_until_cleared(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
+    ff = tmp_path / 'ffmpeg.exe'
+    ff.write_text('x')
+    calls = []
+
+    def fake_which(name):
+        calls.append(name)
+        return str(ff) if name == 'ffmpeg' else None
+
+    monkeypatch.setattr(ffmpeg_tools.shutil, 'which', fake_which)
+    monkeypatch.delenv('FFMPEG', raising=False)
+    assert ffmpeg_tools.find_ffmpeg() == str(ff)
+    assert ffmpeg_tools.find_ffmpeg() == str(ff)
+    assert calls == ['ffmpeg']   # 2回目はキャッシュから返る
+
+    ffmpeg_tools.clear_cache()
+    ffmpeg_tools.find_ffmpeg()
+    assert calls == ['ffmpeg', 'ffmpeg']
+
+
 def test_find_ffmpeg_not_found(monkeypatch):
+    ffmpeg_tools.clear_cache()
     monkeypatch.delenv('FFMPEG', raising=False)
     monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
     with pytest.raises(ffmpeg_tools.FFmpegNotFound):
@@ -107,17 +154,41 @@ def test_find_ffmpeg_not_found(monkeypatch):
 
 
 def test_find_ffprobe_uses_sibling_then_default(tmp_path, monkeypatch):
+    ffmpeg_tools.clear_cache()
     monkeypatch.delenv('FFPROBE', raising=False)
     monkeypatch.setattr(ffmpeg_tools.shutil, 'which', lambda n: None)
     ff = tmp_path / 'ffmpeg.exe'
     ff.write_text('x')
     assert ffmpeg_tools.find_ffprobe(str(ff), default=str(ff)) == str(ff)
     (tmp_path / 'ffprobe.exe').write_text('x')
+    ffmpeg_tools.clear_cache()   # ファイルが出来たので探索をやり直す
     assert ffmpeg_tools.find_ffprobe(str(ff)) == str(tmp_path / 'ffprobe.exe')
     assert ffmpeg_tools.find_ffprobe(None, default='ffprobe') == 'ffprobe'
 
 
 # ---- freevideo
+
+def test_freevideo_quality_profiles():
+    balanced = freevideo.graph('a', 544, 960, 5, seed=1)['1']['inputs']
+    assert (balanced['two_pass'], balanced['base_steps'], balanced['refine_steps'],
+            balanced['upscale_factor']) == (True, 8, 3, '2')
+
+    fast = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast')['1']['inputs']
+    assert (fast['two_pass'], fast['base_steps']) == (False, 6)
+    assert 'refine_steps' not in fast
+    # upscale_factor は two_pass 専用（options は '2'/'1.5'/'1.2'）。一パスでは渡さない。
+    assert 'upscale_factor' not in fast
+
+    fastest = freevideo.graph('a', 544, 960, 5, seed=1, quality='fastest')['1']['inputs']
+    assert fastest['base_steps'] == 4
+    assert 'refine_steps' not in fastest
+    assert 'upscale_factor' not in fastest
+
+    custom = freevideo.graph('a', 544, 960, 5, seed=1, quality='fast', base_steps=3)
+    assert custom['1']['inputs']['base_steps'] == 3
+    with pytest.raises(ValueError, match='未知の quality'):
+        freevideo.graph('a', 544, 960, 5, quality='ultra')
+
 
 def test_freevideo_graph_and_video_of(tmp_path):
     g = freevideo.graph('a scene', 544, 960, 7, seed=5)
@@ -177,11 +248,24 @@ def test_speaker_with_no_styles_raises_named_error(monkeypatch):
 
 
 def test_freevideo_output_root_comes_from_env(monkeypatch):
+    """出力ルートは import 時ではなく呼び出し時に解決する。"""
     monkeypatch.setenv('FREEVIDEO_OUTPUT_ROOT', 'E:/other/output')
-    import importlib
-    fv = importlib.reload(freevideo)
-    try:
-        assert fv.DEFAULT_OUTPUT_ROOT == Path('E:/other/output')
-    finally:
-        monkeypatch.delenv('FREEVIDEO_OUTPUT_ROOT')
-        importlib.reload(freevideo)
+    entry = {'outputs': {'1': {'images': [{'filename': 'v.mp4'}]}}}
+    assert freevideo.video_of(entry) == Path('E:/other/output/v.mp4')
+    # 呼び出し時に上書きできる（旧来の引数もそのまま効く）
+    assert freevideo.video_of(entry, 'E:/explicit') == Path('E:/explicit/v.mp4')
+
+
+def test_freevideo_base_url_comes_from_env(monkeypatch):
+    """サーバー URL も import 時ではなく呼び出し時に解決する。"""
+    seen = []
+    monkeypatch.setenv('FREEVIDEO_URL', 'http://example:9')
+    monkeypatch.setattr(freevideo.urllib.request, 'urlopen',
+                        lambda url, timeout: seen.append(url) or _Bytes(b'{}'))
+    freevideo.get('/queue')
+    assert seen == ['http://example:9/queue']
+
+
+class _Bytes(bytes):
+    def read(self):
+        return self

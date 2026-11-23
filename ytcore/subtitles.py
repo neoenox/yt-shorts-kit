@@ -7,7 +7,7 @@ from pathlib import Path
 
 def srt_time(t):
     """秒 → SRT の時刻表記 `HH:MM:SS,mmm`。"""
-    ms = round(t * 1000)
+    ms = max(0, round(t * 1000))
     return f'{ms // 3600000:02}:{ms // 60000 % 60:02}:{ms // 1000 % 60:02},{ms % 1000:03}'
 
 
