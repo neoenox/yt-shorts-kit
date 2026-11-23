@@ -92,3 +92,11 @@ def test_others_ignores_unlocked_stale_file(tmp_path):
     (cache / 'stale.lock').write_text('99999999 build stale', encoding='utf8')
     assert vp_lock.others(tmp_path, 'self') == 0
     assert (cache / 'stale.lock').exists()
+
+
+def test_read_ignores_windows_lock_byte_prefix(tmp_path):
+    cache = tmp_path / 'cache'
+    cache.mkdir()
+    lock = cache / 'prefix.lock'
+    lock.write_text('\\0' + str(os.getpid()) + ' build 12:00:00', encoding='utf8')
+    assert vp_lock._read(lock) == (os.getpid(), 'build 12:00:00')
