@@ -930,57 +930,103 @@ def _part_fp(a, b, codefp):
         h.update(json.dumps([ci, SPEC['chapters'][ci], TL[ci], [x for x in SEGS if x['scene'] == ci]],
                             sort_keys=True, ensure_ascii=False).encode())
     return h.hexdigest()
-def stage_build(chunk=1000,bgm_db=-6.0):
-    load_runtime();chunk=int(os.environ.get('VP_CHUNK',chunk))   # 部品の長さ（フレーム）。短くすると、差分再描画の粒度が細かくなる
-    keep_parts = os.environ.get('VP_KEEP_PARTS') == '1';full = os.environ.get('VP_FULL') == '1'
+def stage_build(chunk=1000, bgm_db=-6.0):
+    load_runtime()
+    chunk = int(os.environ.get('VP_CHUNK', chunk))   # 部品の長さ（フレーム）。短くすると、差分再描画の粒度が細かくなる
+    keep_parts = os.environ.get('VP_KEEP_PARTS') == '1'
+    full = os.environ.get('VP_FULL') == '1'
     import time as _t
-    codefp=_code_fp();fps={a:_part_fp(a,min(a+chunk,N),codefp) for a in range(0,N,chunk)};pending=[];reused=0
-    for a in range(0,N,chunk):
-        mp=P(f'cache/{SLUG}_part_{a}_{a+chunk}.mp4');fpf=P(f'cache/{SLUG}_part_{a}_{a+chunk}.fp')
-        ok=mp.exists() and mp.stat().st_size>0
-        if ok and (keep_parts or (not full and fpf.exists() and fpf.read_text(encoding='utf8')==fps[a])):reused+=1;continue   # 変わっていない部品は、作り直さない
-        if mp.exists():mp.unlink()
-        if fpf.exists():fpf.unlink()
+    codefp = _code_fp()
+    fps = {a: _part_fp(a, min(a + chunk, N), codefp) for a in range(0, N, chunk)}
+    pending, reused = [], 0
+    for a in range(0, N, chunk):
+        mp = P(f'cache/{SLUG}_part_{a}_{a + chunk}.mp4')
+        fpf = P(f'cache/{SLUG}_part_{a}_{a + chunk}.fp')
+        ok = mp.exists() and mp.stat().st_size > 0
+        # 変わっていない部品は、作り直さない
+        if ok and (keep_parts or (not full and fpf.exists() and fpf.read_text(encoding='utf8') == fps[a])):
+            reused += 1
+            continue
+        if mp.exists():
+            mp.unlink()
+        if fpf.exists():
+            fpf.unlink()
         pending.append(a)
-    want={f'{SLUG}_part_{a}_{a+chunk}' for a in range(0,N,chunk)}
-    for f in list(P('cache').glob(f'{SLUG}_part_*.mp4'))+list(P('cache').glob(f'{SLUG}_part_*.fp')):   # 部品の長さが違う古い部品は、結合に混ざらないよう消す
-        if f.stem not in want:f.unlink()
-    print(f'parts: {len(fps)} (reuse {reused}, render {len(pending)})',flush=True)
+    want = {f'{SLUG}_part_{a}_{a + chunk}' for a in range(0, N, chunk)}
+    # 部品の長さが違う古い部品は、結合に混ざらないよう消す
+    for f in list(P('cache').glob(f'{SLUG}_part_*.mp4')) + list(P('cache').glob(f'{SLUG}_part_*.fp')):
+        if f.stem not in want:
+            f.unlink()
+    print(f'parts: {len(fps)} (reuse {reused}, render {len(pending)})', flush=True)
     from ytcore import vp_lock
-    maxpar=int(os.environ['VP_MAXPAR']) if os.environ.get('VP_MAXPAR') else vp_lock.share_maxpar(ROOT,SLUG)   # 別の build が動いていれば、並列数を分け合う
-    running=[];rc=[];tries={};why=[]
-    TRANSIENT=('Could not open encoder','OpenEncodeSessionEx','No capable devices','NVENC','nvenc','CUDA_ERROR','out of memory')
+    # 別の build が動いていれば、並列数を分け合う
+    maxpar = int(os.environ['VP_MAXPAR']) if os.environ.get('VP_MAXPAR') else vp_lock.share_maxpar(ROOT, SLUG)
+    running, rc, tries, why = [], [], {}, []
+    TRANSIENT = ('Could not open encoder', 'OpenEncodeSessionEx', 'No capable devices',
+                 'NVENC', 'nvenc', 'CUDA_ERROR', 'out of memory')
     while pending or running:   # NVENC の同時セッションは8本まで（14本同時だと、Could not open encoder で落ちる）
-        while pending and not why and len(running)<maxpar:
-            a=pending.pop(0);ef=P(f'cache/{SLUG}_part_{a}.err');fh=open(ef,'w',encoding='utf8')
-            running.append((a,subprocess.Popen([sys.executable,'-m','ytcore.vp',SLUG,'part',str(a),str(a+chunk)],cwd=str(ROOT),env={**os.environ,'PYTHONIOENCODING':'utf8'},stderr=fh),fh,ef))
+        while pending and not why and len(running) < maxpar:
+            a = pending.pop(0)
+            ef = P(f'cache/{SLUG}_part_{a}.err')
+            fh = open(ef, 'w', encoding='utf8')
+            cmd = [sys.executable, '-m', 'ytcore.vp', SLUG, 'part', str(a), str(a + chunk)]
+            running.append((a, subprocess.Popen(cmd, cwd=str(ROOT),
+                                                env={**os.environ, 'PYTHONIOENCODING': 'utf8'}, stderr=fh), fh, ef))
         _t.sleep(1)
         for q_ in [q for q in running if q[1].poll() is not None]:
-            running.remove(q_);q_[2].close();err=q_[3].read_text(encoding='utf8',errors='replace') if q_[3].exists() else ''
-            if why:continue   # すでに止めると決めたあと（kill された部品）は数えない
-            if q_[1].returncode==0:
-                rc.append(0);P(f'cache/{SLUG}_part_{q_[0]}_{q_[0]+chunk}.fp').write_text(fps[q_[0]],encoding='utf8');continue
-            transient=any(t in err for t in TRANSIENT)
-            if transient and tries.get(q_[0],0)<2:   # GPUの一時失敗だけ、少し待って部品ごとにやり直す
-                tries[q_[0]]=tries.get(q_[0],0)+1;_t.sleep(10);pending.append(q_[0])
+            running.remove(q_)
+            q_[2].close()
+            err = q_[3].read_text(encoding='utf8', errors='replace') if q_[3].exists() else ''
+            if why:
+                continue   # すでに止めると決めたあと（kill された部品）は数えない
+            if q_[1].returncode == 0:
+                rc.append(0)
+                P(f'cache/{SLUG}_part_{q_[0]}_{q_[0] + chunk}.fp').write_text(fps[q_[0]], encoding='utf8')
+                continue
+            transient = any(t in err for t in TRANSIENT)
+            if transient and tries.get(q_[0], 0) < 2:   # GPUの一時失敗だけ、少し待って部品ごとにやり直す
+                tries[q_[0]] = tries.get(q_[0], 0) + 1
+                _t.sleep(10)
+                pending.append(q_[0])
             else:   # 必ず失敗するエラーは、待たずに止める（残りの部品も止める）
-                rc.append(q_[1].returncode);last=[l for l in err.strip().split('\n') if l.strip()][-3:]
-                why.append(f'part {q_[0]}: '+' | '.join(last));sys.stderr.write(err[-2000:]+'\n')
-                for r_ in running:r_[1].kill()
+                rc.append(q_[1].returncode)
+                last = [l for l in err.strip().split('\n') if l.strip()][-3:]
+                why.append(f'part {q_[0]}: ' + ' | '.join(last))
+                sys.stderr.write(err[-2000:] + '\n')
+                for r_ in running:
+                    r_[1].kill()
                 pending.clear()
-    for f_ in P('cache').glob(f'{SLUG}_part_*.err'):f_.unlink(missing_ok=True)
-    if why:raise AssertionError('part render failed (not retried: deterministic error) '+'; '.join(why))
-    assert all(r==0 for r in rc),f'part render failed {rc}'
-    parts=[P(f'cache/{SLUG}_part_{a}_{a+chunk}.mp4') for a in range(0,N,chunk)];miss=[p.name for p in parts if not p.exists() or p.stat().st_size==0]
-    assert not miss,f'部品が足りない: {miss}'
-    lst=P(f'cache/{SLUG}_parts.txt');lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts))
-    wav=P(f'out/{SLUG}_narration.wav');nob=P(f'out/{SLUG}_video_nobgm.mp4');af,j=loud_args(wav)
-    subprocess.run([_ffmpeg(),'-y','-v','warning','-f','concat','-safe','0','-i',str(lst),'-i',str(wav),'-map','0:v','-map','1:a','-c:v','copy','-af',af,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(nob)],check=True)
-    mix=P(f'cache/{SLUG}_mix.wav');bgm=P(f'out/{SLUG}_bgm.wav')
-    fc=f"[0:a]aresample=48000,pan=stereo|c0=c0|c1=c0,asplit=2[n1][n2];[1:a]volume={bgm_db}dB[bg];[bg][n2]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=900:makeup=1[duck];[n1][duck]amix=inputs=2:normalize=0:duration=first[m]"
-    subprocess.run([_ffmpeg(),'-y','-v','warning','-i',str(wav),'-i',str(bgm),'-filter_complex',fc,'-map','[m]','-c:a','pcm_s16le',str(mix)],check=True)
-    af2,j2=loud_args(mix);out=P(f'out/{SLUG}_video.mp4')
-    subprocess.run([_ffmpeg(),'-y','-v','warning','-i',str(nob),'-i',str(mix),'-map','0:v','-map','1:a','-c:v','copy','-af',af2,'-c:a','aac','-b:a','192k','-ar','48000','-movflags','+faststart','-shortest',str(out)],check=True)
+    for f_ in P('cache').glob(f'{SLUG}_part_*.err'):
+        f_.unlink(missing_ok=True)
+    if why:
+        raise AssertionError('part render failed (not retried: deterministic error) ' + '; '.join(why))
+    assert all(r == 0 for r in rc), f'part render failed {rc}'
+    parts = [P(f'cache/{SLUG}_part_{a}_{a + chunk}.mp4') for a in range(0, N, chunk)]
+    miss = [p.name for p in parts if not p.exists() or p.stat().st_size == 0]
+    assert not miss, f'部品が足りない: {miss}'
+    lst = P(f'cache/{SLUG}_parts.txt')
+    lst.write_text(''.join(f"file '{p.as_posix()}'\n" for p in parts))
+    wav = P(f'out/{SLUG}_narration.wav')
+    nob = P(f'out/{SLUG}_video_nobgm.mp4')
+    af, j = loud_args(wav)
+    subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-f', 'concat', '-safe', '0', '-i', str(lst),
+                    '-i', str(wav), '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', af,
+                    '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart',
+                    '-shortest', str(nob)], check=True)
+    mix = P(f'cache/{SLUG}_mix.wav')
+    bgm = P(f'out/{SLUG}_bgm.wav')
+    fc = (f'[0:a]aresample=48000,pan=stereo|c0=c0|c1=c0,asplit=2[n1][n2];'
+          f'[1:a]volume={bgm_db}dB[bg];'
+          f'[bg][n2]sidechaincompress=threshold=0.02:ratio=4:attack=30:release=900:makeup=1[duck];'
+          f'[n1][duck]amix=inputs=2:normalize=0:duration=first[m]')
+    subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-i', str(wav), '-i', str(bgm),
+                    '-filter_complex', fc, '-map', '[m]', '-c:a', 'pcm_s16le', str(mix)], check=True)
+    af2, j2 = loud_args(mix)
+    out = P(f'out/{SLUG}_video.mp4')
+    subprocess.run([_ffmpeg(), '-y', '-v', 'warning', '-i', str(nob), '-i', str(mix),
+                    '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-af', af2, '-c:a', 'aac',
+                    '-b:a', '192k', '-ar', '48000', '-movflags', '+faststart', '-shortest', str(out)],
+                   check=True)
     # 焼き込んだ字幕の指紋を残す（あとで「字幕だけ直して焼き直していない」を中身で判定するため）
     srt=P(f'out/{SLUG}_subtitles.srt')
     if srt.exists():
