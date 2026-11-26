@@ -35,6 +35,7 @@ TRAILING_UI = (
     'パーソナライズなしで試す',
     'All items removed from input context.',
     '前のプロンプトにスキップする',
+    'AI モードの回答が作成されました',
 )
 
 
@@ -83,43 +84,54 @@ def _wait_enabled_send(pg, selector, limit=90):
     raise TimeoutError('送信ボタンが有効にならない')
 
 
+def _body(pg):
+    """ページ本体。bsk のオーバーレイ内の body は除く。"""
+    target = pg.locator('main').first
+    if not target.count():
+        target = pg.locator('body:not(browser-skill-overlay body)').first
+    return target
+
+
 def _google_answer(pg, timeout):
     """返答本文が3回連続で変わるまで待つ（既定の途中経由を拾わない）。"""
     mark = 'に対する AI モードの回答'
-    last = ''
-    stable = 0
-    body = ''
-    end = time.time() + timeout
-    while time.time() < end:
-        pg.wait_for_timeout(4000)
-        body = pg.locator('body').first.inner_text()
-        i = body.rfind(mark)
-        answer = body[i + len(mark):].strip() if i >= 0 else ''
-        if answer and len(answer) > 150 and not any(x in answer for x in TRAILING_UI):
-            if answer == last:
-                stable += 1
-            else:
-                stable, last = 0, answer
-            if stable >= 3:
-                return last
-    return last or body
-
-
-def _chatgpt_answer(pg, selector, timeout):
+    target = _body(pg)
     end = time.time() + timeout
     last = ''
-    stable = 0
-    locator = pg.locator(selector)
     while time.time() < end:
         pg.wait_for_timeout(3000)
-        n = locator.count()
-        if not n:
-            continue
-        text = locator.nth(n - 1).inner_text().strip()
-        if text and text == last:
+        body = target.inner_text()
+        i = body.rfind(mark)
+        answer = body[i + len(mark):].strip() if i >= 0 else ''
+        done = 'AI モードの回答が作成されました' in body
+        if len(answer) > 20 and done:
+            for ui in TRAILING_UI:
+                answer = answer.replace(ui, '').strip()
+            return answer
+        last = answer
+    return last
+
+
+def _chatgpt_answer(pg, before, timeout):
+    """送信前の本文との差分から返答を取り出す。
+
+    ChatGPT の DOM は日々変わるので、特定の role 属性に依存しない。
+    """
+    end = time.time() + timeout
+    last = ''
+    stable = 0
+    main = _body(pg)
+    while time.time() < end:
+        pg.wait_for_timeout(3000)
+        text = main.inner_text()
+        answer = text[len(before):].strip() if text.startswith(before) else text.strip()
+        i = answer.rfind('あなたの発言:')
+        if i >= 0:
+            answer = answer[i + len('あなたの発言:'):].strip()
+        if answer and answer == last:
             stable += 1
         else:
-            stable, last = 0, text
+            stable, last = 0, answer
         if stable >= 2 and len(last) > 80:
             return last
     return last
@@ -145,9 +157,12 @@ def submit(script, target, prompt, dry_run=False, timeout=180):
             composer = pg.locator(cfg['composer']).first
             composer.fill(prompt)
             pg.wait_for_timeout(1000)
+            before = ''
+            if target == 'chatgpt':
+                before = _body(pg).inner_text()
             _wait_enabled_send(pg, cfg['send']).click()
             if target == 'google':
                 return _google_answer(pg, timeout)
-            return _chatgpt_answer(pg, cfg['reply'], timeout)
+            return _chatgpt_answer(pg, before, timeout)
         finally:
             pg.close()

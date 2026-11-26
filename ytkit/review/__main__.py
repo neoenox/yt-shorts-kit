@@ -1,5 +1,7 @@
 """python -m ytkit.review の入口。"""
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 from .prompt import build_prompt
@@ -36,6 +38,24 @@ def main(argv=None):
     targets = ['chatgpt', 'google'] if a.target == 'both' else [a.target]
     out_dir = Path(a.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    if a.target == 'both' and not a.dry_run:
+        # Playwright の sync API はスレッド間で共有できない。別プロセスで同時に走らせる。
+        children = []
+        for target in targets:
+            argv = [sys.executable, '-m', 'ytkit.review', 'run', a.path,
+                    '--adapter', a.adapter, '--project', a.project,
+                    '--slug', a.slug, '--target', target, '--out-dir', a.out_dir]
+            children.append((target, subprocess.Popen(argv)))
+        failed = []
+        for target, proc in children:
+            if proc.wait() != 0:
+                failed.append(target)
+        if failed:
+            print(f'failed: {", ".join(failed)}', file=sys.stderr)
+            return 1
+        return 0
+
     for target in targets:
         prompt = build_prompt(script, target)
         if a.dry_run:

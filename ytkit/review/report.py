@@ -51,7 +51,7 @@ def _parse(path, target, slug, project):
 
 
 # 成果物は out/ 直下か shorts/<slug>/ か docs/ 配下にある。深掘りしない。
-SEARCH_DIRS = ('out', 'shorts', 'docs')
+SEARCH_DIRS = ('out', 'out_en', 'shorts', 'docs')
 
 
 def collect(roots):

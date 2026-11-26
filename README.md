@@ -131,12 +131,17 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 各プロジェクトの入口は `scripts/script_review.py`（rakuten は `script_review_common.py`、detour-lab はリポジトリ直下の `script_review.py`）です。既存の `google_ai_review.py` と `script_review.py` は残してあります。
 
 ```powershell
-python scripts/script_review.py <slug>                 # 両方に送る
+python scripts/script_review.py <slug>                 # 両方に送る（並列実行）
 python scripts/script_review.py <slug> --target chatgpt
+python scripts/script_review.py <slug> --target google
 python scripts/script_review.py <slug> --dry-run       # 依頼文だけ表示
 ```
 
+既定の `both` は2つの子プロセスを起こして ChatGPT と Google AI に同時に送ります。片方だけ先に見たいときは `--target` で指定します。Playwright の sync API はスレッド間で共有できないため、並列化はスレッドではなく別プロセスで行っています。
+
 返答は `<台本のある dir>/review_<target>_<slug>.md` に保存します。ブラウザは CDP 経由で接続し、落ちていれば最小化で起動します。設定は環境変数 `REVIEW_CDP_PORT`（既定 9222）、`REVIEW_PROFILE`、`CHROME_PATH` で渡します。
+
+実行前に、レビュー用 Chrome で ChatGPT と Google AI にログイン済みであることを確認してください。Google AI は回答の完了マーカーが出るまで待つため、1件あたり1〜3分かかります。bsk のオーバーレイが開いていても返答取得は除外するようになっています。
 
 成果物の一覧は次のコマンドで作ります。判定と指摘件数を拾い、元ファイルへのリンクを付けた HTML を出力します。
 

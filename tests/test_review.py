@@ -125,3 +125,34 @@ def test_report_marks_missing_project(tmp_path):
     out = tmp_path / 'list.html'
     result = report.build_report([str(root)], str(out))
     assert result['rows'] == 0
+
+
+def test_both_targets_spawn_two_processes(tmp_path, monkeypatch):
+    """--target both は2つの子プロセスを起こし、両方の完了を待つ。"""
+    import subprocess
+    from ytkit.review import __main__ as cli
+
+    path = tmp_path / 'script.json'
+    _write_json(path, HONNOJI)
+    calls = []
+
+    class FakeProc:
+        def __init__(self, argv):
+            calls.append(argv)
+            self.argv = argv
+
+        def wait(self):
+            return 0
+
+        @property
+        def returncode(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, 'Popen', FakeProc)
+    rc = cli.main(['run', str(path), '--adapter', 'honnoji_json',
+                   '--project', 'p', '--slug', 's', '--target', 'both',
+                   '--out-dir', str(tmp_path)])
+    assert rc == 0
+    assert len(calls) == 2
+    assert '--target' in calls[0] and calls[0][calls[0].index('--target') + 1] == 'chatgpt'
+    assert '--target' in calls[1] and calls[1][calls[1].index('--target') + 1] == 'google'
