@@ -216,7 +216,7 @@ def test_both_targets_spawn_two_processes(tmp_path, monkeypatch):
             return 0
 
     monkeypatch.setattr(subprocess, 'Popen', FakeProc)
-    monkeypatch.setattr(cli, 'close_review_tabs', lambda: None)
+    monkeypatch.setattr(cli, 'finish', lambda: None)
     rc = cli.main(['run', str(path), '--adapter', 'honnoji_json',
                    '--project', 'p', '--slug', 's', '--target', 'both',
                    '--out-dir', str(tmp_path)])
