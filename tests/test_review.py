@@ -127,6 +127,45 @@ def test_report_marks_missing_project(tmp_path):
     assert result['rows'] == 0
 
 
+def test_custom_prompt_template(tmp_path, capsys):
+    """任意のプロンプトの {{ARTICLE}} を本文で置換する。"""
+    from ytkit.review import __main__ as cli
+    article = tmp_path / 'article.md'
+    article.write_text('記事本文ABC', encoding='utf8')
+    tpl = tmp_path / 'prompt.md'
+    tpl.write_text('校閲してください:\n{{ARTICLE}}\n', encoding='utf8')
+    rc = cli.main(['custom', str(article), '--prompt-file', str(tpl),
+                   '--slug', 'x', '--target', 'chatgpt', '--dry-run',
+                   '--out-dir', str(tmp_path)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert '校閲してください' in out
+    assert '記事本文ABC' in out
+    assert '{{ARTICLE}}' not in out
+
+
+def test_close_review_tabs_closes_only_targets(monkeypatch):
+    """ChatGPT / Google AI のタブだけを閉じ、ほかは残す。"""
+    from ytkit.review import browser
+
+    class FakePage:
+        def __init__(self, url):
+            self.url = url
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    pages = [
+        FakePage('https://chatgpt.com/'),
+        FakePage('https://www.google.com/ai/'),
+        FakePage('https://youtube.com/studio'),
+    ]
+    context = type('Ctx', (), {'pages': pages})()
+    browser._close_review_tabs(type('B', (), {'contexts': [context]})())
+    assert [p.closed for p in pages] == [True, True, False]
+
+
 def test_video_prompt_has_review_items():
     text = build_video_prompt('テスト動画')
     assert 'テスト動画' in text
@@ -177,6 +216,7 @@ def test_both_targets_spawn_two_processes(tmp_path, monkeypatch):
             return 0
 
     monkeypatch.setattr(subprocess, 'Popen', FakeProc)
+    monkeypatch.setattr(cli, 'close_review_tabs', lambda: None)
     rc = cli.main(['run', str(path), '--adapter', 'honnoji_json',
                    '--project', 'p', '--slug', 's', '--target', 'both',
                    '--out-dir', str(tmp_path)])
