@@ -70,6 +70,33 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 - 直したら、`pytest` を、ここと使っているプロジェクトの両方で回す。両方に変更が要るときは、**ここを先にコミット・push** してから、プロジェクト側をコミットする。
 - 履歴を書き換えない(公開済みのため)。メールアドレスは GitHub の noreply アドレスにしてある。
 
+### 検証コマンドと波及チェック
+`python` が Microsoft Store の shim を指す環境では pytest が起動しない。次の Python を共通の検証インタプリタとして使う。
+
+```powershell
+& 'C:\Users\neoen\AppData\Local\Programs\Python\Python312\python.exe' -m pytest -q
+```
+
+別の環境では、実際に pytest が動く Python を 1 つ決めて、このコマンドを置き換える。変更したら、次を順に確認する。
+
+1. このリポジトリで上のコマンドを実行し、`passed` と `failed` / `skipped` の数を記録する。
+2. 使っているプロジェクトでも同じコマンドを実行し、結果を記録する。実際に共通部品を import しているのは次の3つです。
+   - `E:\rekishikaisetu-honnoji` — shim 経由で `ytcore` を使用。`pytest -q tests` が対象（`scripts/test_terrain.py` は `pyproj` が必要）。
+   - `E:\rakuten-shorts-affiliate` — `ytkit` の部品を直接使用。`channel.toml` は無い。
+   - `E:\rekishikaisetu-detour-lab` — `detour_ffmpeg.py` から `ytkit.ffmpeg_tools` を使用。音声（Kokoro / Piper）と字幕はプロジェクト側に残す。
+   `E:\rekishikaisetu` には `channel.toml` はありますが、共通部品の import は見つかっていません。
+3. `skipped` が出たら、ffmpeg と Noto Sans/Serif JP VF フォントの有無を確認し、スキップ理由を残す。
+4. 両方に変更が要るときは、このリポジトリを先にコミット・push してから、プロジェクト側をコミットする。
+5. 編集可能インストールのときは、動画制作中に未コミットの変更を置かない。実験は別ブランチか別環境で行う。
+
+### 描画 Golden の更新
+`tests/test_render_golden.py` の `GOLDEN` は、NotoSansJP-VF.ttf / NotoSerifJP-VF.ttf がある環境で 7 フレームを描いたピクセルの SHA-256 です。座標・色・描画順を変えると壊れます。
+
+- 更新してよいのは、描画結果を意図して変えたときだけです。意図しない差分はコードを直し、ハッシュは書き換えません。
+- 取り直す担当者が `GOLDEN` を更新し、コメントに日付・フォント環境・変更理由を残します。別環境の値で上書きしません。
+- フォントが無い環境ではハッシュ比較がスキップされます。スキップされたら「検証できた」と書かず、上の検証コマンドの記録に理由を残します。
+- 更新したら、このリポジトリと使っているプロジェクトの両方で pytest を回します（上の手順 1〜4）。
+
 ## 環境変数
 `FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_URL`（既定 `http://127.0.0.1:8188`）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）、`YOUTUBE_API_KEY`（YouTube リサーチ用）。ytcore の各パイプラインも、これらの環境変数を `ytkit` 経由で呼び出し時に読みます。
 
@@ -82,3 +109,39 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 - 全リポジトリに効く。変更したら両方の `pytest` を回す（`tests/test_kit.py` は移行前の出力文字列、`tests/test_core.py` はytcore のテキスト整形・字幕境界・ロックを確かめている）。
 - チャンネル固有の値（話者・BGM・パス・規約）は `channel.toml`、実行ファイルやサービスの場所は環境変数で渡し、ここに固定しない。
 - 規約ゲート・承認・公開の処理はここに入れない。
+
+## 境界違反の監査と消化（2026-11-24）
+`ytkit` 側は違反なし。実行ファイル・サービスの場所はすべて環境変数経由で、規約ゲート・承認・公開処理も入っていません。依存方向も `ytcore → ytkit` の一方向が保たれています。監査で見つかった3か所は、いずれも設定キーを増やさずに消化しました。
+
+- `ytcore/script_lint.py` — 『信長公記』『東照宮御実紀』の略称検査を削除しました。設定キーを足すと import 時の ConfigError 波及があるため、コアから外しています。ほかの WARN は残り、lint は WARN だけで止めません。`tests/test_core.py` に回帰テストを追加しました。
+- `ytcore/vp_check.py` — BGM の既定値 `assets/bgm_maou` / `maou_bgm_{name}.mp3` を外しました。`channel.toml` の `[bgm] dir` / `pattern` が無いときは ERR にします。`BGM` は `vp.py:35` で既に必須なので、利用側の設定変更は不要です。
+- `ytcore/make_short.py` — 概要欄の `#Shorts #雑学 #科学` を `TAGS['shorts']` に合わせました。`channel.toml` の `[hashtags] shorts` は既に必須なので、利用側の設定変更は不要です。`tests/test_core.py` に回帰テストを追加しました。
+
+`ytcore/vp.py:31-45` と `ytcore/make_short.py:13-19` は import 時に `channel.toml` を読みます。設定キーを増やすと全プロジェクトの `channel.toml` にそのキーが無い限り import が落ちるので、変更時は注意してください。消化した3件はいずれも設定キーを増やしていないため、このリスクは回避しています。
+
+## 台本レビュー
+`ytkit.review` に、台本を ChatGPT と Google AI（`www.google.com/ai`）へ送る共通部品を置いています。各プロジェクトの台本形式は adapter で共通形に直すので、呼び出し側はプロジェクト名と adapter を指定するだけです。
+
+| adapter | 対象 | 台本の場所 |
+|---|---|---|
+| `honnoji_json` | `rekishikaisetu-honnoji` | `data/short_<slug>.json` |
+| `rakuten_result` | `rakuten-shorts-affiliate` | `shorts/<slug>/result.json` |
+| `markdown` | `rekishikaisetu-detour-lab` | `SAMPLE_SCRIPT.md` など |
+
+各プロジェクトの入口は `scripts/script_review.py`（rakuten は `script_review_common.py`、detour-lab はリポジトリ直下の `script_review.py`）です。既存の `google_ai_review.py` と `script_review.py` は残してあります。
+
+```powershell
+python scripts/script_review.py <slug>                 # 両方に送る
+python scripts/script_review.py <slug> --target chatgpt
+python scripts/script_review.py <slug> --dry-run       # 依頼文だけ表示
+```
+
+返答は `<台本のある dir>/review_<target>_<slug>.md` に保存します。ブラウザは CDP 経由で接続し、落ちていれば最小化で起動します。設定は環境変数 `REVIEW_CDP_PORT`（既定 9222）、`REVIEW_PROFILE`、`CHROME_PATH` で渡します。
+
+成果物の一覧は次のコマンドで作ります。判定と指摘件数を拾い、元ファイルへのリンクを付けた HTML を出力します。
+
+```powershell
+python -m ytkit.review report --roots "E:\rekishikaisetu-honnoji,E:\rakuten-shorts-affiliate,E:\rekishikaisetu-detour-lab" --out out/review_index.html
+```
+
+設計は `docs/superpowers/specs/2026-11-26-script-review-design.md` にあります。

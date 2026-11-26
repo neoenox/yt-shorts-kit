@@ -17,6 +17,8 @@ from PIL import Image, ImageDraw
 
 # 2026-11-23 時点の Windows 環境（NotoSansJP-VF.ttf / NotoSerifJP-VF.ttf）で
 # 現在の ytcore.vp を描画した値。描画順・座標・色を変えると壊れる。
+# 更新ルール: README「描画 Golden の更新」を参照。意図した描画変更のときだけ
+# 担当者が現環境で取り直し、日付・フォント環境・理由をここに残す。
 GOLDEN = {
     0: '933776a9a922802cba75e2a75a778f81dc111151bf6bdde538c4da590e97b2a3',
     15: 'd3ecec0969d16744b6e0612e77651d874fe87c8c0b09121748a25f7e2adf9c4b',
