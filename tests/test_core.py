@@ -313,3 +313,30 @@ def test_encode_frames_writes_frames_and_reports_failure(vp, monkeypatch, tmp_pa
     rc[0] = 1
     with pytest.raises(ms.subprocess.CalledProcessError):
         ms.encode_frames(tmp_path / 'a.mp4', [b'ab'])
+
+
+def test_make_short_description_uses_configured_hashtag(vp):
+    """概要欄のハッシュタグは channel.toml の [hashtags] shorts を使う。"""
+    import ytcore.make_short as ms
+    spec = {
+        'title': 'タイトル', 'long_id': 'abc', 'about': '概要',
+    }
+    text = ms.description(spec)
+    assert '#s' in text
+    assert '#Shorts #雑学 #科学' not in text
+
+
+def test_script_lint_does_not_hardcode_historical_source_names(tmp_path, capsys):
+    """史料名の略称検査はコアに固定しない。ほかの WARN は残る。"""
+    from ytcore import script_lint
+    theme = tmp_path / 'theme'
+    theme.mkdir()
+    (theme / '09_script_v2.md').write_text(
+        '前文\n## 第一章　あ\n1. 公記に書かれています。その後、実紀を読みます。\n'
+        '2. これは、かなり、長い、文で、読点が、多い。\n', encoding='utf8')
+    rc = script_lint.run({'theme_dir': lambda: theme})
+    captured = capsys.readouterr().out
+    assert rc == 0
+    assert '『信長公記』と書く' not in captured
+    assert '『東照宮御実紀』と書く' not in captured
+    assert '読点が' in captured  # 既存の WARN は残る
