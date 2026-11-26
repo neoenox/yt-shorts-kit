@@ -196,6 +196,32 @@ def submit(script, target, prompt, dry_run=False, timeout=180, video=None):
             pg.close()
 
 
+def close_review_tabs():
+    """レビュー用 Chrome の ChatGPT / Google AI タブを全部閉じる。
+
+    親プロセスが、すべてのレビューの完了後に1回だけ呼ぶ。
+    """
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.connect_over_cdp(_cdp())
+        _close_review_tabs(browser)
+
+
+def _close_review_tabs(browser):
+    """レビュー完了後に、ChatGPT / Google AI のタブを全部閉じる。
+
+    レビュー用プロファイル内の対象タブだけを閉じ、ほかのタブは残す。
+    """
+    for context in browser.contexts:
+        for page in list(context.pages):
+            url = page.url
+            if 'chatgpt.com' in url or 'google.com/ai' in url:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+
 def submit_video(video, prompt, dry_run=False, timeout=300):
     """完成動画を Google AI に送る。"""
     return submit({}, 'google', prompt, dry_run=dry_run,

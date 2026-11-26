@@ -143,11 +143,24 @@ python scripts/script_review.py <slug> --dry-run       # 依頼文だけ表示
 
 実行前に、レビュー用 Chrome で ChatGPT と Google AI にログイン済みであることを確認してください。Google AI は回答の完了マーカーが出るまで待つため、1件あたり1〜3分かかります。bsk のオーバーレイが開いていても返答取得は除外するようになっています。
 
+レビューが終わると、レビュー用 Chrome の ChatGPT と Google AI のタブをすべて閉じます。YouTube Studio など、ほかのタブは残します。
+
 成果物の一覧は次のコマンドで作ります。判定と指摘件数を拾い、元ファイルへのリンクを付けた HTML を出力します。
 
 ```powershell
 python -m ytkit.review report --roots "E:\rekishikaisetu-honnoji,E:\rakuten-shorts-affiliate,E:\rekishikaisetu-detour-lab" --out out/review_index.html
 ```
+
+### 任意のテキストをレビューする
+
+Shorts や動画以外の文章も送れる。`{{ARTICLE}}` を含むプロンプトを `--prompt-file` で渡すと、その部分を本文に置換する。
+
+```powershell
+python -m ytkit.review custom article.md --prompt-file review/prompt.md --slug article
+python -m ytkit.review custom article.md --prompt-file review/prompt.md --slug article --dry-run
+```
+
+`noteaffi` の note 記事レビューは `tools/ai_review_common.py` からこの機能を使う。
 
 ### 完成動画を Google AI でレビューする
 

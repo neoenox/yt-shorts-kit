@@ -7,7 +7,7 @@ from pathlib import Path
 from .prompt import build_prompt, build_video_prompt
 from .report import build_report
 from .script import load_script
-from .browser import submit, submit_video
+from .browser import submit, submit_video, close_review_tabs
 
 
 def main(argv=None):
@@ -22,6 +22,15 @@ def main(argv=None):
     run.add_argument('--target', default='both', choices=['chatgpt', 'google', 'both'])
     run.add_argument('--out-dir', default='out')
     run.add_argument('--dry-run', action='store_true')
+
+    custom = sub.add_parser('custom', help='任意のテキストとプロンプトを AI に送る')
+    custom.add_argument('path', help='レビュー対象のテキストファイル')
+    custom.add_argument('--prompt-file', help='プロンプトのテンプレート。{{ARTICLE}} を本文に置換する')
+    custom.add_argument('--project', default='custom')
+    custom.add_argument('--slug', required=True)
+    custom.add_argument('--target', default='both', choices=['chatgpt', 'google', 'both'])
+    custom.add_argument('--out-dir', default='out')
+    custom.add_argument('--dry-run', action='store_true')
 
     vid = sub.add_parser('video', help='完成動画を Google AI に送る')
     vid.add_argument('video')
@@ -41,6 +50,46 @@ def main(argv=None):
         print(build_report(roots, a.out))
         return 0
 
+    if a.cmd == 'custom':
+        text = Path(a.path).read_text(encoding='utf8')
+        if a.prompt_file:
+            tpl = Path(a.prompt_file).read_text(encoding='utf8')
+            prompt = tpl.replace('{{ARTICLE}}', text)
+        else:
+            prompt = text
+        out_dir = Path(a.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        targets = ['chatgpt', 'google'] if a.target == 'both' else [a.target]
+        if a.dry_run:
+            print(prompt)
+            return 0
+        if a.target == 'both':
+            # 子には compose 済みのプロンプトを渡す。子は単一 target なので直接送信する。
+            children = []
+            for target in targets:
+                tmp = out_dir / f'_prompt_{target}_{a.slug}.txt'
+                tmp.write_text(prompt, encoding='utf8')
+                argv = [sys.executable, '-m', 'ytkit.review', 'custom', str(tmp),
+                        '--project', a.project, '--slug', a.slug,
+                        '--target', target, '--out-dir', a.out_dir]
+                children.append((target, tmp, subprocess.Popen(argv)))
+            failed = []
+            for target, tmp, proc in children:
+                if proc.wait() != 0:
+                    failed.append(target)
+                tmp.unlink(missing_ok=True)
+            if failed:
+                print(f'failed: {", ".join(failed)}', file=sys.stderr)
+                return 1
+        else:
+            target = a.target
+            answer = submit({}, target, prompt)
+            path = out_dir / f'review_{target}_{a.slug}.md'
+            path.write_text(answer, encoding='utf8')
+            print(f'saved {path} ({len(answer)} chars)')
+        close_review_tabs()
+        return 0
+
     if a.cmd == 'video':
         prompt = build_video_prompt(a.title)
         if a.dry_run:
@@ -53,6 +102,7 @@ def main(argv=None):
         path = out_dir / f'review_google_video_{slug}.md'
         path.write_text(answer, encoding='utf8')
         print(f'saved {path} ({len(answer)} chars)')
+        close_review_tabs()
         return 0
 
     script = load_script(a.path, a.adapter, a.project, a.slug)
@@ -75,6 +125,7 @@ def main(argv=None):
         if failed:
             print(f'failed: {", ".join(failed)}', file=sys.stderr)
             return 1
+        close_review_tabs()
         return 0
 
     for target in targets:
@@ -87,6 +138,8 @@ def main(argv=None):
         path = out_dir / f'review_{target}_{a.slug}.md'
         path.write_text(answer, encoding='utf8')
         print(f'saved {path} ({len(answer)} chars)')
+    if not a.dry_run:
+        close_review_tabs()
     return 0
 
 
