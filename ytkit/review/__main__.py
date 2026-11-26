@@ -1,36 +1,33 @@
 """python -m ytkit.review の入口。"""
 import argparse
-import subprocess
-import sys
 from pathlib import Path
 
 from .prompt import build_prompt, build_video_prompt
 from .report import build_report
+from .runner import finish, run_one, run_parallel, targets_of
 from .script import load_script
-from .browser import submit, submit_video, close_review_tabs
 
 
-def main(argv=None):
+def _parser():
     ap = argparse.ArgumentParser(description='台本レビューの共通部品')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
+    def common(p, path_help):
+        p.add_argument('path', help=path_help)
+        p.add_argument('--project', default='custom')
+        p.add_argument('--slug', required=True)
+        p.add_argument('--target', default='both', choices=['chatgpt', 'google', 'both'])
+        p.add_argument('--out-dir', default='out')
+        p.add_argument('--dry-run', action='store_true')
+
     run = sub.add_parser('run', help='台本を ChatGPT / Google AI に送る')
-    run.add_argument('path')
-    run.add_argument('--adapter', required=True, choices=['honnoji_json', 'rakuten_result', 'markdown'])
-    run.add_argument('--project', required=True)
-    run.add_argument('--slug', required=True)
-    run.add_argument('--target', default='both', choices=['chatgpt', 'google', 'both'])
-    run.add_argument('--out-dir', default='out')
-    run.add_argument('--dry-run', action='store_true')
+    common(run, '台本ファイル')
+    run.add_argument('--adapter', required=True,
+                     choices=['honnoji_json', 'rakuten_result', 'markdown'])
 
     custom = sub.add_parser('custom', help='任意のテキストとプロンプトを AI に送る')
-    custom.add_argument('path', help='レビュー対象のテキストファイル')
-    custom.add_argument('--prompt-file', help='プロンプトのテンプレート。{{ARTICLE}} を本文に置換する')
-    custom.add_argument('--project', default='custom')
-    custom.add_argument('--slug', required=True)
-    custom.add_argument('--target', default='both', choices=['chatgpt', 'google', 'both'])
-    custom.add_argument('--out-dir', default='out')
-    custom.add_argument('--dry-run', action='store_true')
+    common(custom, 'レビュー対象のテキストファイル')
+    custom.add_argument('--prompt-file', help='{{ARTICLE}} を本文に置換するテンプレート')
 
     vid = sub.add_parser('video', help='完成動画を Google AI に送る')
     vid.add_argument('video')
@@ -42,14 +39,11 @@ def main(argv=None):
     rep = sub.add_parser('report', help='レビュー成果物の一覧 HTML を作る')
     rep.add_argument('--roots', required=True, help='カンマ区切りのプロジェクトルート')
     rep.add_argument('--out', default='out/review_index.html')
+    return ap
 
-    a = ap.parse_args(argv)
 
-    if a.cmd == 'report':
-        roots = [x for x in a.roots.split(',') if x.strip()]
-        print(build_report(roots, a.out))
-        return 0
-
+def _compose(a):
+    """サブコマンドごとの (script, prompts, video) を返す。"""
     if a.cmd == 'custom':
         text = Path(a.path).read_text(encoding='utf8')
         if a.prompt_file:
@@ -57,90 +51,50 @@ def main(argv=None):
             prompt = tpl.replace('{{ARTICLE}}', text)
         else:
             prompt = text
-        out_dir = Path(a.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        targets = ['chatgpt', 'google'] if a.target == 'both' else [a.target]
-        if a.dry_run:
-            print(prompt)
-            return 0
-        if a.target == 'both':
-            # 子には compose 済みのプロンプトを渡す。子は単一 target なので直接送信する。
-            children = []
-            for target in targets:
-                tmp = out_dir / f'_prompt_{target}_{a.slug}.txt'
-                tmp.write_text(prompt, encoding='utf8')
-                argv = [sys.executable, '-m', 'ytkit.review', 'custom', str(tmp),
-                        '--project', a.project, '--slug', a.slug,
-                        '--target', target, '--out-dir', a.out_dir]
-                children.append((target, tmp, subprocess.Popen(argv)))
-            failed = []
-            for target, tmp, proc in children:
-                if proc.wait() != 0:
-                    failed.append(target)
-                tmp.unlink(missing_ok=True)
-            if failed:
-                print(f'failed: {", ".join(failed)}', file=sys.stderr)
-                return 1
-        else:
-            target = a.target
-            answer = submit({}, target, prompt)
-            path = out_dir / f'review_{target}_{a.slug}.md'
-            path.write_text(answer, encoding='utf8')
-            print(f'saved {path} ({len(answer)} chars)')
-        close_review_tabs()
+        return {}, {t: prompt for t in targets_of(a.target)}, None
+
+    if a.cmd == 'run':
+        script = load_script(a.path, a.adapter, a.project, a.slug)
+        prompts = {t: build_prompt(script, t) for t in targets_of(a.target)}
+        return script, prompts, None
+
+    prompt = build_video_prompt(a.title)
+    return {}, {'google': prompt}, a.video
+
+
+def main(argv=None):
+    a = _parser().parse_args(argv)
+
+    if a.cmd == 'report':
+        roots = [x for x in a.roots.split(',') if x.strip()]
+        print(build_report(roots, a.out))
         return 0
 
-    if a.cmd == 'video':
-        prompt = build_video_prompt(a.title)
-        if a.dry_run:
-            print(prompt)
-            return 0
-        answer = submit_video(a.video, prompt)
-        slug = a.slug or Path(a.video).stem
-        out_dir = Path(a.out_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        path = out_dir / f'review_google_video_{slug}.md'
-        path.write_text(answer, encoding='utf8')
-        print(f'saved {path} ({len(answer)} chars)')
-        close_review_tabs()
-        return 0
-
-    script = load_script(a.path, a.adapter, a.project, a.slug)
-    targets = ['chatgpt', 'google'] if a.target == 'both' else [a.target]
-    out_dir = Path(a.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    if a.target == 'both' and not a.dry_run:
-        # Playwright の sync API はスレッド間で共有できない。別プロセスで同時に走らせる。
-        children = []
-        for target in targets:
-            argv = [sys.executable, '-m', 'ytkit.review', 'run', a.path,
-                    '--adapter', a.adapter, '--project', a.project,
-                    '--slug', a.slug, '--target', target, '--out-dir', a.out_dir]
-            children.append((target, subprocess.Popen(argv)))
-        failed = []
-        for target, proc in children:
-            if proc.wait() != 0:
-                failed.append(target)
-        if failed:
-            print(f'failed: {", ".join(failed)}', file=sys.stderr)
-            return 1
-        close_review_tabs()
-        return 0
-
-    for target in targets:
-        prompt = build_prompt(script, target)
-        if a.dry_run:
+    script, prompts, video = _compose(a)
+    if a.dry_run:
+        for target, prompt in prompts.items():
             print(f'--- {target} ---')
             print(prompt)
-            continue
-        answer = submit(script, target, prompt)
-        path = out_dir / f'review_{target}_{a.slug}.md'
-        path.write_text(answer, encoding='utf8')
-        print(f'saved {path} ({len(answer)} chars)')
-    if not a.dry_run:
-        close_review_tabs()
-    return 0
+        return 0
+
+    if a.cmd == 'custom' and a.target == 'both':
+        # 子には compose 済みプロンプトを渡す。子は単一 target なので直接送信する。
+        cmd = ['custom', a.path]
+        if a.prompt_file:
+            cmd += ['--prompt-file', a.prompt_file]
+        cmd += ['--project', a.project]
+        rc = run_parallel(cmd, a.out_dir, a.slug, prompts)
+    elif a.cmd == 'run' and a.target == 'both':
+        cmd = ['run', a.path, '--adapter', a.adapter, '--project', a.project]
+        rc = run_parallel(cmd, a.out_dir, a.slug, prompts)
+    else:
+        target = next(iter(prompts))
+        run_one(script, target, prompts[target], a.out_dir, a.slug, video)
+        rc = 0
+
+    if rc == 0:
+        finish()
+    return rc
 
 
 if __name__ == '__main__':
