@@ -142,6 +142,7 @@ def test_vp_cli_dispatches_known_command(vp, monkeypatch):
 def test_loud_args_uses_two_pass_measurement(vp, monkeypatch):
     measured = {'input_i': '-15.3', 'input_tp': '-1.4', 'input_lra': '4.2',
                 'input_thresh': '-25.6', 'target_offset': '0.3'}
+    monkeypatch.setattr(vp, '_ffmpeg', lambda: '/tools/ffmpeg')
     monkeypatch.setattr(vp.yloud, 'measure_loudnorm',
                         lambda path, ffmpeg=None, lra=None: measured)
     af, got = vp.loud_args('narration.wav')
@@ -250,6 +251,9 @@ def test_lock_others_counts_prep_and_audio_as_builds(tmp_path, monkeypatch):
     (cache / 'other2.lock').write_text(f'{os.getpid()} audio 12:00:00', encoding='utf8')
     (cache / 'other3.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
     (cache / 'self.lock').write_text(f'{os.getpid()} build 12:00:00', encoding='utf8')
+    # Simulate lock contention for these metadata-only fixtures. Real OS-level
+    # contention and stale-file behavior are exercised in tests/test_lock.py.
+    monkeypatch.setattr(vp_lock, '_try_lock', lambda fd: False)
     assert vp_lock.others(tmp_path, 'self') == 3
 
 
