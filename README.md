@@ -149,4 +149,17 @@ python scripts/script_review.py <slug> --dry-run       # 依頼文だけ表示
 python -m ytkit.review report --roots "E:\rekishikaisetu-honnoji,E:\rakuten-shorts-affiliate,E:\rekishikaisetu-detour-lab" --out out/review_index.html
 ```
 
+### 完成動画を Google AI でレビューする
+
+完成動画を `www.google.com/ai` に添付して、字幕・音声・文字の重なり・事実関係など8項目をレビューさせる。
+
+```powershell
+python -m ytkit.review video out/short_x.mp4 --slug x --out-dir out
+python -m ytkit.review video out/short_x.mp4 --title "動画の題名" --dry-run
+```
+
+各プロジェクトの入口からも呼べます。`scripts/script_review_video.py`（honnoji）、`scripts/script_review_video_common.py`（rakuten）、`script_review_video.py`（detour-lab）です。返答は `review_google_video_<slug>.md` に保存し、一覧にも `google-video` として載ります。
+
+動画のアップロードがあるため、台本レビューより時間がかかります。レビュー用 Chrome で Google にログイン済みであること。
+
 設計は `docs/superpowers/specs/2026-11-26-script-review-design.md` にあります。

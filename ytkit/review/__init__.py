@@ -4,10 +4,11 @@
 結果を一覧ページにまとめる。
 """
 from .script import load_script, ADAPTERS
-from .prompt import build_prompt
-from .browser import submit
+from .prompt import build_prompt, build_video_prompt
+from .browser import submit, submit_video
 from .report import build_report
 
 __all__ = [
-    'load_script', 'ADAPTERS', 'build_prompt', 'submit', 'build_report',
+    'load_script', 'ADAPTERS', 'build_prompt', 'build_video_prompt',
+    'submit', 'submit_video', 'build_report',
 ]

@@ -9,6 +9,7 @@ from pathlib import Path
 
 # (target, slug) を取り出す。新しい順に試す。
 PATTERNS = [
+    ('google-video', re.compile(r'^review_google_video_(.+)\.md$')),
     ('chatgpt', re.compile(r'^review_chatgpt_(.+)\.md$')),
     ('google', re.compile(r'^review_google_(.+)\.md$')),
     ('google', re.compile(r'^review_googleai_(.+)\.md$')),

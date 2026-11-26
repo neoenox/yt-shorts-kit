@@ -4,10 +4,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .prompt import build_prompt
+from .prompt import build_prompt, build_video_prompt
 from .report import build_report
 from .script import load_script
-from .browser import submit
+from .browser import submit, submit_video
 
 
 def main(argv=None):
@@ -23,6 +23,13 @@ def main(argv=None):
     run.add_argument('--out-dir', default='out')
     run.add_argument('--dry-run', action='store_true')
 
+    vid = sub.add_parser('video', help='完成動画を Google AI に送る')
+    vid.add_argument('video')
+    vid.add_argument('--slug', default=None)
+    vid.add_argument('--title', default='')
+    vid.add_argument('--out-dir', default='out')
+    vid.add_argument('--dry-run', action='store_true')
+
     rep = sub.add_parser('report', help='レビュー成果物の一覧 HTML を作る')
     rep.add_argument('--roots', required=True, help='カンマ区切りのプロジェクトルート')
     rep.add_argument('--out', default='out/review_index.html')
@@ -32,6 +39,20 @@ def main(argv=None):
     if a.cmd == 'report':
         roots = [x for x in a.roots.split(',') if x.strip()]
         print(build_report(roots, a.out))
+        return 0
+
+    if a.cmd == 'video':
+        prompt = build_video_prompt(a.title)
+        if a.dry_run:
+            print(prompt)
+            return 0
+        answer = submit_video(a.video, prompt)
+        slug = a.slug or Path(a.video).stem
+        out_dir = Path(a.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f'review_google_video_{slug}.md'
+        path.write_text(answer, encoding='utf8')
+        print(f'saved {path} ({len(answer)} chars)')
         return 0
 
     script = load_script(a.path, a.adapter, a.project, a.slug)

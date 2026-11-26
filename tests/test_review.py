@@ -1,7 +1,7 @@
 """ytkit.review の回帰テスト。ブラウザは触らない。"""
 import json
 
-from ytkit.review import build_report, build_prompt, load_script
+from ytkit.review import build_report, build_prompt, build_video_prompt, load_script
 from ytkit.review import browser, report
 
 HONNOJI = {
@@ -125,6 +125,34 @@ def test_report_marks_missing_project(tmp_path):
     out = tmp_path / 'list.html'
     result = report.build_report([str(root)], str(out))
     assert result['rows'] == 0
+
+
+def test_video_prompt_has_review_items():
+    text = build_video_prompt('テスト動画')
+    assert 'テスト動画' in text
+    assert '時刻つきで書き起こしてください' in text
+    assert '字幕と音声の一致' in text
+    assert '公開可' in text and '修正必要' in text
+
+
+def test_video_dry_run_does_not_touch_browser(tmp_path):
+    from ytkit.review import submit_video
+    video = tmp_path / 'a.mp4'
+    video.write_bytes(b'x')
+    prompt = '動画レビュー用プロンプト'
+    assert submit_video(str(video), prompt, dry_run=True) == prompt
+
+
+def test_video_report_pattern(tmp_path):
+    root = tmp_path / 'proj'
+    out = root / 'out'
+    out.mkdir(parents=True)
+    (out / 'review_google_video_demo.md').write_text(
+        '総評: 公開可\n重大度: 低\n', encoding='utf8')
+    rows = report.collect([str(root)])
+    assert len(rows) == 1
+    assert rows[0]['target'] == 'google-video'
+    assert rows[0]['slug'] == 'demo'
 
 
 def test_both_targets_spawn_two_processes(tmp_path, monkeypatch):

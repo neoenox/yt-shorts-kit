@@ -72,7 +72,7 @@ def _ensure_chrome(url):
     ])
 
 
-def _wait_enabled_send(pg, selector, limit=90):
+def _wait_enabled_send(pg, selector, limit=240):
     end = time.time() + limit
     locator = pg.locator(selector)
     while time.time() < end:
@@ -137,12 +137,38 @@ def _chatgpt_answer(pg, before, timeout):
     return last
 
 
-def submit(script, target, prompt, dry_run=False, timeout=180):
-    """prompt を target に送り、返答本文を返す。dry_run なら prompt をそのまま返す。"""
+def _attach_video(pg, path):
+    """Google AI に動画を添付する。既存の honnoji 実装と同じ手順。"""
+    p = Path(path).resolve()
+    if not p.is_file():
+        raise FileNotFoundError(f'動画が無い: {p}')
+    pg.locator('button[aria-label="ファイルとツールを追加し、モデルを選択します"]').first.click()
+    pg.wait_for_timeout(1500)
+    inputs = pg.locator('input[type=file]')
+    target = None
+    for i in range(inputs.count()):
+        inp = inputs.nth(i)
+        accept = inp.get_attribute('accept') or ''
+        if not accept:
+            target = inp
+            break
+    if target is None:
+        target = inputs.last
+    target.set_input_files(str(p))
+    pg.wait_for_timeout(10000)
+
+
+def submit(script, target, prompt, dry_run=False, timeout=180, video=None):
+    """prompt を target に送り、返答本文を返す。dry_run なら prompt をそのまま返す。
+
+    video を渡すと Google AI に動画を添付してから送る。
+    """
     if target not in TARGETS:
         raise ValueError(f'未知の target: {target}')
     if dry_run:
         return prompt
+    if video and target != 'google':
+        raise ValueError('動画添付は google のみ対応')
     cfg = TARGETS[target]
     _ensure_chrome(cfg['url'])
     from playwright.sync_api import sync_playwright
@@ -154,6 +180,8 @@ def submit(script, target, prompt, dry_run=False, timeout=180):
             pg.goto(cfg['url'], wait_until='domcontentloaded')
             pg.wait_for_timeout(8000)
             pg.bring_to_front()
+            if video:
+                _attach_video(pg, video)
             composer = pg.locator(cfg['composer']).first
             composer.fill(prompt)
             pg.wait_for_timeout(1000)
@@ -166,3 +194,9 @@ def submit(script, target, prompt, dry_run=False, timeout=180):
             return _chatgpt_answer(pg, before, timeout)
         finally:
             pg.close()
+
+
+def submit_video(video, prompt, dry_run=False, timeout=300):
+    """完成動画を Google AI に送る。"""
+    return submit({}, 'google', prompt, dry_run=dry_run,
+                  timeout=timeout, video=video)
