@@ -162,8 +162,12 @@ def run(V, quiet=False):
         elif skeys.index(a) > skeys.index(c):
             E(f'bgm {b}: 開始が終了より後ろ')
         bgm_cfg = V.get('BGM') or {}
-        bgm_dir = bgm_cfg.get('dir', 'assets/bgm_maou')
-        bgm_name = bgm_cfg.get('pattern', 'maou_bgm_{name}.mp3').format(name=name)
+        bgm_dir = bgm_cfg.get('dir')
+        bgm_pattern = bgm_cfg.get('pattern')
+        if not bgm_dir or not bgm_pattern:
+            E(f'bgm {b}: channel.toml の [bgm] dir / pattern が必要')
+            continue
+        bgm_name = bgm_pattern.format(name=name)
         if not (P(bgm_dir) / bgm_name).exists():
             E(f'bgm {b}: 曲 {bgm_dir}/{bgm_name} が無い')
     covered = set()

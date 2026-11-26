@@ -213,7 +213,7 @@ def draw_visual(d, kind, a, k):
 def synth(spec, work):
     style = vv.speaker_id(VOICE['speaker'], VOICE['style'], base=vv.base_url(), timeout=60)
     dic = json.loads((ROOT / spec['pron']).read_text(encoding='utf8'))
-    segs, pcms, rate, t = [], [], 24000, 0.25
+    segs, pcms, rate, t = [], [], 24000, 0.0
     for i, sc in enumerate(spec['scenes']):
         spoken = vv.apply_pron(sc['text'], dic)
         wav, kana = vv.synth(spoken, style, SPEED, intonation=1.08, base=vv.base_url())
@@ -225,7 +225,7 @@ def synth(spec, work):
         pcms.append(pcm); t += dur + 0.35
         pcms.append(np.zeros(int(0.35 * rate), np.int16))
     total = t + 0.6
-    full = np.concatenate([np.zeros(int(0.25 * rate), np.int16)] + pcms + [np.zeros(int(0.6 * rate), np.int16)])
+    full = np.concatenate(pcms + [np.zeros(int(0.6 * rate), np.int16)])
     with wave.open(str(work / 'narration.wav'), 'wb') as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(full.tobytes())
     return segs, total
@@ -349,7 +349,7 @@ def description(spec):
 ■ このチャンネルについて
 {CH['about']}
 
-#Shorts #雑学 #科学
+{TAGS['shorts']}
 """
 
 
