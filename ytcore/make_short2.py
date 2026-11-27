@@ -296,7 +296,7 @@ def frame_at(spec, segs, cks, t, preview=False):
             im = vid_frame(sc['vid'], sc.get('dim', 0.55), seg['i'], seg['end'] - seg['start'] + 0.55).convert('RGBA')
     else:
         im = bg(sc.get('art') or spec['art'], ratio, sc.get('dim', 0.55), spec.get('bg_fit', 1.12)).convert('RGBA')
-    hook_on = bool(spec.get('hook_card', True) and spec.get('answer') and t < 2.25)
+    hook_on = bool(spec.get('hook_card', True) and spec.get('answer') and t < 3.2)
     if hook_on:   # 結論カードの間は、後ろの見出し・図を出さない(重なり防止)。カードが消えてから出す
         a = max(0.0, min(1.0, (t - 1.9) / 0.35))
     if hook_on:   # PILは透明度0でも文字を描いてしまうので、見出し・図そのものを描かない(ヘッダーだけ)
@@ -307,7 +307,7 @@ def frame_at(spec, segs, cks, t, preview=False):
     if spec.get('hook_card', True):
         draw_hook(im, spec, t)
     ck = next((c for c in cks if c[0] <= t < c[1]), None)
-    if ck and not (spec.get('hook_card', True) and spec.get('answer') and t < 1.75):   # 結論カードと字幕が同じことを二重に言わないようにする
+    if ck and not (spec.get('hook_card', True) and spec.get('answer') and t < 2.7):   # 結論カードと字幕が同じことを二重に言わないようにする
         d = ImageDraw.Draw(im, 'RGBA')
         fs = 60
         lns = [w for part in ck[2].split('\n') for w in wrap(d, part, font(fs), 880)]
