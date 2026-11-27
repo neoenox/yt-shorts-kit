@@ -98,7 +98,7 @@ uv pip install "yt-shorts-kit @ git+https://github.com/neoenox/yt-shorts-kit@mas
 - 更新したら、このリポジトリと使っているプロジェクトの両方で pytest を回します（上の手順 1〜4）。
 
 ## 環境変数
-`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_URL`（既定 `http://127.0.0.1:8188`）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）、`YOUTUBE_API_KEY`（YouTube リサーチ用）。ytcore の各パイプラインも、これらの環境変数を `ytkit` 経由で呼び出し時に読みます。
+`FFMPEG` / `FFPROBE`（実行ファイルの場所）、`VOICEVOX_URL`（既定 `http://127.0.0.1:50021`）、`YT_PROJECT_ROOT`（プロジェクトのルート。`channel.toml` を探す場所）、`FREEVIDEO_URL`（既定 `http://127.0.0.1:8188`）、`FREEVIDEO_OUTPUT_ROOT`（FreeVideo の出力ルート。既定 `output`）、`YOUTUBE_API_KEY`（YouTube リサーチ用）、`UPLOAD_CHANNEL_ID` / `UPLOAD_CDP_PORT` / `UPLOAD_PROFILE` / `UPLOAD_PROFILE_DIR`（アップロード先チャンネルと接続先 Chrome）。ytcore の各パイプラインも、これらの環境変数を `ytkit` 経由で呼び出し時に読みます。
 
 ## 方針
 長尺 `vp`、Short 描画 `make_short` / `make_short2`、`hn_text`、`rich_text` などの描画コアは、すでにここへ移行済みです。モジュール名は変えず、プロジェクト側の `scripts/<名前>.py` を薄い入口にして呼びます。
@@ -189,5 +189,21 @@ python -m ytkit.review studio --question-file question.md --slug growth
 各プロジェクトの入口は `scripts/ask_studio.py`（honnoji）、`scripts/ask_studio_common.py`（rakuten）、`ask_studio.py`（detour-lab）、`tools/ask_studio_common.py`（noteaffi）です。返答は `ask_studio_<slug>.md` に保存します。
 
 設定は `STUDIO_CDP_PORT`、`STUDIO_PROFILE`（既定 `C:\Users\neoen\.chrome-gemienox`）、`STUDIO_PROFILE_DIR`（既定 `Profile 3`）で渡します。ポート未指定なら空きポートを自動取得します。レビュー用の `REVIEW_*` とは別です。
+
+## 動画アップロード
+
+`ytkit.upload` に、YouTube Studio へ動画をアップロードして**非公開**で保存する共通部品を置いています。公開は明示オプションのみです。アップロード先のチャンネル ID は `--channel-id` か `UPLOAD_CHANNEL_ID` で渡します（既定値は持ちません）。既存の `upload_short.py`（生CDP）は残してあります。
+ブラウザ操作に必要な Playwright は `pip install -e ".[browser]"` で入れます（GitHub 経由なら `yt-shorts-kit[browser]`）。CDP 接続に失敗しても、この機能が起動した Chrome 以外は閉じません。既存の Chrome に接続する場合は `UPLOAD_CDP_PORT` / `UPLOAD_PROFILE` を明示してください。
+
+アップロード用パックは1フォルダに次を揃えます。`video.mp4` / `title.txt` / `description.txt` が必須で、`thumbnail.jpg` / `subtitles.srt` は任意です。`subtitles.srt` は保存後に翻訳画面から日本語字幕として添付・公開します。ハッシュタグは概要欄に含めてください。
+
+```powershell
+python -m ytkit.upload check <pack_dir>                 # 必須ファイルだけ確認
+python -m ytkit.upload run <pack_dir> --slug my_video --dry-run
+python -m ytkit.upload run <pack_dir> --slug my_video   # 非公開で保存
+python -m ytkit.upload run <pack_dir> --slug my_video --publish  # 明示時のみ公開
+```
+
+接続先は `UPLOAD_CDP_PORT` / `UPLOAD_PROFILE` / `UPLOAD_PROFILE_DIR` で指定します。ポート未指定なら空きポートを自動取得します。Ask Studio と同じチャンネル用プロファイル（既定 `.chrome-gemienox` / `Profile 3`）を使います。
 
 設計は `docs/superpowers/specs/2026-11-26-script-review-design.md` にあります。
