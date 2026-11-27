@@ -175,4 +175,17 @@ python -m ytkit.review video out/short_x.mp4 --title "動画の題名" --dry-run
 
 動画のアップロードがあるため、台本レビューより時間がかかります。レビュー用 Chrome で Google にログイン済みであること。
 
+### Ask Studio に質問する
+
+YouTube Studio 右上の「Ask Studio」に質問し、返答を保存する。対象アカウントの Chrome プロファイルに CDP で接続する。
+
+```powershell
+python -m ytkit.review studio "今月の視聴回数が多い動画を教えて" --slug growth --out-dir out
+python -m ytkit.review studio --question-file question.md --slug growth
+```
+
+各プロジェクトの入口は `scripts/ask_studio.py`（honnoji）、`scripts/ask_studio_common.py`（rakuten）、`ask_studio.py`（detour-lab）、`tools/ask_studio_common.py`（noteaffi）です。返答は `ask_studio_<slug>.md` に保存します。
+
+設定は `STUDIO_CDP_PORT`（既定 9222）、`STUDIO_PROFILE`（既定 `C:\Users\neoen\.chrome-gemienox`）、`STUDIO_PROFILE_DIR`（既定 `Profile 3`）で渡します。レビュー用の `REVIEW_*` とは別です。
+
 設計は `docs/superpowers/specs/2026-11-26-script-review-design.md` にあります。

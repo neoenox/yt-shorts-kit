@@ -127,6 +127,20 @@ def test_report_marks_missing_project(tmp_path):
     assert result['rows'] == 0
 
 
+def test_studio_dry_run():
+    from ytkit.review import ask_studio
+    assert ask_studio('テスト質問', dry_run=True) == 'テスト質問'
+
+
+def test_studio_cli_dry_run(tmp_path, capsys):
+    from ytkit.review import __main__ as cli
+    q = tmp_path / 'q.md'
+    q.write_text('チャンネルの調子を教えて', encoding='utf8')
+    rc = cli.main(['studio', '--question-file', str(q), '--slug', 'x', '--dry-run'])
+    assert rc == 0
+    assert 'チャンネルの調子を教えて' in capsys.readouterr().out
+
+
 def test_custom_prompt_template(tmp_path, capsys):
     """任意のプロンプトの {{ARTICLE}} を本文で置換する。"""
     from ytkit.review import __main__ as cli
