@@ -1,7 +1,7 @@
 """Playwright で ChatGPT / Google AI に台本を送り、返答を取る。
 
 Chrome は CDP 経由で接続する。ポートとプロファイルは環境変数で受ける。
-    REVIEW_CDP_PORT  既定 9222
+    REVIEW_CDP_PORT  既定 9223
     REVIEW_PROFILE   既定 C:\\Users\\neoen\\.chrome-automation
     CHROME_PATH      既定 C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe
 """
@@ -39,8 +39,23 @@ TRAILING_UI = (
 )
 
 
+_port_cache = None
+
+
+def _free_port():
+    """OS に空きポートを聞く。候補数に上限は無い。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
 def _port():
-    return int(os.environ.get('REVIEW_CDP_PORT', '9222'))
+    """明示指定があればそれを使う。なければ空きポートを OS から取得して固定する。"""
+    global _port_cache
+    if _port_cache is None:
+        explicit = os.environ.get('REVIEW_CDP_PORT')
+        _port_cache = int(explicit) if explicit else _free_port()
+    return _port_cache
 
 
 def _cdp():

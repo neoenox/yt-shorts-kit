@@ -127,6 +127,32 @@ def test_report_marks_missing_project(tmp_path):
     assert result['rows'] == 0
 
 
+def test_browser_port_auto_assigned(monkeypatch):
+    """明示指定がなければ OS から空きポートを取得する。"""
+    from ytkit.review import browser
+    monkeypatch.delenv('REVIEW_CDP_PORT', raising=False)
+    monkeypatch.setattr(browser, '_port_cache', None)
+    port = browser._port()
+    assert 1024 < port < 65536
+    assert browser._port() == port  # 同じ実行内では固定される
+
+
+def test_browser_port_explicit(monkeypatch):
+    from ytkit.review import browser
+    monkeypatch.setenv('REVIEW_CDP_PORT', '9333')
+    monkeypatch.setattr(browser, '_port_cache', None)
+    assert browser._port() == 9333
+
+
+def test_studio_port_auto_assigned(monkeypatch):
+    from ytkit.review import studio
+    monkeypatch.delenv('STUDIO_CDP_PORT', raising=False)
+    monkeypatch.setattr(studio, '_port_cache', None)
+    port = studio._port()
+    assert 1024 < port < 65536
+    assert studio._port() == port
+
+
 def test_studio_dry_run():
     from ytkit.review import ask_studio
     assert ask_studio('テスト質問', dry_run=True) == 'テスト質問'

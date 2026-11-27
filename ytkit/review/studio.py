@@ -19,8 +19,22 @@ SEND = 'ytcp-icon-button[aria-label="送信"]'
 DISCARD = 'AI は不正確な情報を表示することがあります'
 
 
+_port_cache = None
+
+
+def _free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('127.0.0.1', 0))
+        return s.getsockname()[1]
+
+
 def _port():
-    return int(os.environ.get('STUDIO_CDP_PORT', '9222'))
+    """明示指定がなければ OS から空きポートを取得して固定する。"""
+    global _port_cache
+    if _port_cache is None:
+        explicit = os.environ.get('STUDIO_CDP_PORT')
+        _port_cache = int(explicit) if explicit else _free_port()
+    return _port_cache
 
 
 def _cdp():

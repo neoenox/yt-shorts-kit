@@ -139,7 +139,9 @@ python scripts/script_review.py <slug> --dry-run       # 依頼文だけ表示
 
 既定の `both` は2つの子プロセスを起こして ChatGPT と Google AI に同時に送ります。片方だけ先に見たいときは `--target` で指定します。Playwright の sync API はスレッド間で共有できないため、並列化はスレッドではなく別プロセスで行っています。
 
-返答は `<台本のある dir>/review_<target>_<slug>.md` に保存します。ブラウザは CDP 経由で接続し、落ちていれば最小化で起動します。設定は環境変数 `REVIEW_CDP_PORT`（既定 9222）、`REVIEW_PROFILE`、`CHROME_PATH` で渡します。
+返答は `<台本のある dir>/review_<target>_<slug>.md` に保存します。ブラウザは CDP 経由で接続し、落ちていれば最小化で起動します。設定は環境変数 `REVIEW_CDP_PORT`、`REVIEW_PROFILE`、`CHROME_PATH` で渡します。
+
+`REVIEW_CDP_PORT` を指定しない場合、OS から空きポートを取得してその回の実行で固定します。既存の Chrome に接続したいときだけ、ポートを明示してください。Ask Studio 側も `STUDIO_CDP_PORT` が未指定なら同様に空きポートを取得します。
 
 実行前に、レビュー用 Chrome で ChatGPT と Google AI にログイン済みであることを確認してください。Google AI は回答の完了マーカーが出るまで待つため、1件あたり1〜3分かかります。bsk のオーバーレイが開いていても返答取得は除外するようになっています。
 
@@ -186,6 +188,6 @@ python -m ytkit.review studio --question-file question.md --slug growth
 
 各プロジェクトの入口は `scripts/ask_studio.py`（honnoji）、`scripts/ask_studio_common.py`（rakuten）、`ask_studio.py`（detour-lab）、`tools/ask_studio_common.py`（noteaffi）です。返答は `ask_studio_<slug>.md` に保存します。
 
-設定は `STUDIO_CDP_PORT`（既定 9222）、`STUDIO_PROFILE`（既定 `C:\Users\neoen\.chrome-gemienox`）、`STUDIO_PROFILE_DIR`（既定 `Profile 3`）で渡します。レビュー用の `REVIEW_*` とは別です。
+設定は `STUDIO_CDP_PORT`、`STUDIO_PROFILE`（既定 `C:\Users\neoen\.chrome-gemienox`）、`STUDIO_PROFILE_DIR`（既定 `Profile 3`）で渡します。ポート未指定なら空きポートを自動取得します。レビュー用の `REVIEW_*` とは別です。
 
 設計は `docs/superpowers/specs/2026-11-26-script-review-design.md` にあります。
