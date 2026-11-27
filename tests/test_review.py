@@ -214,6 +214,24 @@ def test_video_prompt_has_review_items():
     assert '公開可' in text and '修正必要' in text
 
 
+def test_video_prompt_lists_all_nine_items_without_praise():
+    text = build_video_prompt('テスト動画')
+    items = [
+        '(1) 音声の読み間違い・音割れ・無音。',
+        '(2) 字幕の表記そのものの違和感。',
+        '(3) 字幕と音声の一致と、タイミングのズレ。',
+        '(4) 文字の重なり・はみ出し・見切れ・折り返し。',
+        '(5) 事実関係と、根拠より強い断定。',
+        '(6) 冒頭1〜3秒の引き。',
+        '(7) AI映像の不自然さ（文字・人物・現代物の混入）。',
+        '(8) 背景映像とテーマの不一致。',
+        '(9) 画面下端や右端のUI被り。',
+    ]
+    for item in items:
+        assert item in text, item
+    assert '要約・称賛・励ましは不要です。問題点だけを書いてください。' in text
+
+
 def test_video_dry_run_does_not_touch_browser(tmp_path):
     from ytkit.review import submit_video
     video = tmp_path / 'a.mp4'
