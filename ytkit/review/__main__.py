@@ -36,6 +36,14 @@ def _parser():
     vid.add_argument('--out-dir', default='out')
     vid.add_argument('--dry-run', action='store_true')
 
+    st = sub.add_parser('studio', help='YouTube Studio の Ask Studio に質問する')
+    st.add_argument('question', nargs='?', default=None)
+    st.add_argument('--question-file', help='質問文のファイル')
+    st.add_argument('--slug', default='studio')
+    st.add_argument('--out-dir', default='out')
+    st.add_argument('--timeout', type=int, default=180)
+    st.add_argument('--dry-run', action='store_true')
+
     rep = sub.add_parser('report', help='レビュー成果物の一覧 HTML を作る')
     rep.add_argument('--roots', required=True, help='カンマ区切りのプロジェクトルート')
     rep.add_argument('--out', default='out/review_index.html')
@@ -68,6 +76,22 @@ def main(argv=None):
     if a.cmd == 'report':
         roots = [x for x in a.roots.split(',') if x.strip()]
         print(build_report(roots, a.out))
+        return 0
+
+    if a.cmd == 'studio':
+        from .studio import ask as ask_studio
+        question = Path(a.question_file).read_text(encoding='utf8') if a.question_file else a.question
+        if not question:
+            raise SystemExit('質問文か --question-file を指定してください')
+        answer = ask_studio(question, timeout=a.timeout, dry_run=a.dry_run)
+        if a.dry_run:
+            print(answer)
+            return 0
+        out_dir = Path(a.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f'ask_studio_{a.slug}.md'
+        path.write_text(answer, encoding='utf8')
+        print(f'saved {path} ({len(answer)} chars)')
         return 0
 
     script, prompts, video = _compose(a)

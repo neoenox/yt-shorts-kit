@@ -7,8 +7,9 @@ from .script import load_script, ADAPTERS
 from .prompt import build_prompt, build_video_prompt
 from .browser import submit, submit_video, close_review_tabs
 from .report import build_report
+from .studio import ask as ask_studio
 
 __all__ = [
     'load_script', 'ADAPTERS', 'build_prompt', 'build_video_prompt',
-    'submit', 'submit_video', 'close_review_tabs', 'build_report',
+    'submit', 'submit_video', 'close_review_tabs', 'build_report', 'ask_studio',
 ]
