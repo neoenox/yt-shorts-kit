@@ -213,3 +213,181 @@ def test_cdp_failure_restarts_only_owned_chrome(monkeypatch, tmp_path):
     assert len(attempts) == 2
     assert len(started) == 2
     assert stopped == ['stop']
+
+
+class _Element:
+    def __init__(self, label, calls, *, checked=False, kind=''):
+        self.label = label
+        self.calls = calls
+        self.checked = checked
+        self.kind = kind
+
+    def is_visible(self):
+        return True
+
+    def inner_text(self):
+        return self.label
+
+    def get_attribute(self, name):
+        if name == 'aria-checked':
+            return 'true' if self.checked else 'false'
+        if name == 'accept':
+            return 'image/*' if self.kind == 'image' else 'video/*'
+        return None
+
+    def click(self, **kwargs):
+        self.calls.append(('click', self.label))
+        if getattr(self, 'on_click', None):
+            self.on_click(self)
+
+    def set_input_files(self, path):
+        self.calls.append(('file', path))
+
+
+class _Locator:
+    def __init__(self, items, calls):
+        self.items = items
+        self.calls = calls
+
+    def count(self):
+        return len(self.items)
+
+    def nth(self, i):
+        return self.items[i]
+
+    @property
+    def first(self):
+        return self.items[0]
+
+    def all(self):
+        return list(self.items)
+
+
+def _upload_page(radio_specs, visibility=None, *, save_ok=True):
+    """upload() の保存画面を模した page。radio_specs は (label, checked, toggles)。"""
+    calls = []
+    radios = []
+    for label, checked, toggles in radio_specs:
+        r = _Element(label, calls, checked=checked)
+        if toggles:
+            r.on_click = lambda e: setattr(e, 'checked', True)
+        radios.append(r)
+    page = SimpleNamespace(
+        calls=calls,
+        url='https://studio.youtube.com/channel/UC123/videos/upload',
+    )
+    upload_button = _Element('#upload-button', calls)
+    video_input = _Element('video-input', calls, kind='video')
+    title_box = _Element('#title-textarea #textbox', calls)
+    desc_box = _Element('ytcp-video-description #textbox', calls)
+    next_button = _Element('#next-button', calls)
+    save_button = _Element('#save-button', calls)
+    vis = _Element('#visibility-text', calls)
+
+    def goto(url, **kwargs):
+        calls.append(('goto', url))
+        page.url = url
+
+    def locator(selector):
+        table = {
+            '#upload-button': [upload_button],
+            'input[type=file]': [video_input],
+            '#title-textarea #textbox': [title_box],
+            'ytcp-video-description #textbox': [desc_box],
+            '#next-button': [next_button],
+            '#save-button': [save_button],
+            'tp-yt-paper-radio-button': radios,
+        }
+        if selector == '#visibility-text':
+            if visibility is None:
+                return _Locator([], calls)
+            vis.label = visibility
+            return _Locator([vis], calls)
+        return _Locator(table.get(selector, []), calls)
+
+    def get_by_text(label, exact=False):
+        return _Locator([_Element(f'text:{label}', calls)], calls)
+
+    page.goto = goto
+    page.locator = locator
+    page.get_by_text = get_by_text
+    page.wait_for_timeout = lambda ms: None
+    page.bring_to_front = lambda: None
+    page.close = lambda: None
+    return page, calls, save_ok
+
+
+def _stub_upload_env(monkeypatch, page, calls, save_ok=True):
+    monkeypatch.setattr(studio, '_ensure_chrome', lambda: None)
+    monkeypatch.setattr(studio, '_body',
+                        lambda pg: SimpleNamespace(inner_text=lambda: ''))
+    monkeypatch.setattr(studio, '_set_field',
+                        lambda pg, selector, value: calls.append(('set', selector)))
+    monkeypatch.setattr(studio, '_video_id', lambda pg: 'abc12345678')
+
+    def click_if_ready(pg, selector, label, limit=120):
+        calls.append(('click_if_ready', selector))
+        return selector != '#save-button' or save_ok
+
+    monkeypatch.setattr(studio, '_click_if_ready', click_if_ready)
+    connect = lambda *a, **k: SimpleNamespace(
+        contexts=[SimpleNamespace(pages=[], new_page=lambda: page)])
+    monkeypatch.setitem(sys.modules, 'playwright', SimpleNamespace())
+    monkeypatch.setitem(sys.modules, 'playwright.sync_api', _fake_playwright(connect))
+
+
+def test_publish_false_without_private_radio_never_clicks_public(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page([('公開', False, True)], visibility='非公開')
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    with pytest.raises(RuntimeError, match='非公開 のラジオが見つかりません'):
+        studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')
+    assert ('click', '公開') not in calls
+    assert ('click_if_ready', '#save-button') not in calls
+
+
+def test_unchecked_private_radio_blocks_save(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page([('非公開', False, False)], visibility='非公開')
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    with pytest.raises(RuntimeError, match='非公開 を選択できませんでした'):
+        studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')
+    assert ('click', '非公開') in calls
+    assert ('click_if_ready', '#save-button') not in calls
+
+
+def test_save_failure_has_no_text_fallback(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page(
+        [('非公開', True, False)], visibility='非公開', save_ok=False)
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    with pytest.raises(RuntimeError, match='保存ボタン'):
+        studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')
+    assert not [c for c in calls if str(c[1]).startswith('text:')]
+
+
+def test_verified_privacy_reports_checked_summary(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page([('非公開', True, False)], visibility='非公開')
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    result = studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')
+    assert result['saved'] is True
+    assert result['privacy_check'] == 'verified'
+    assert ('goto', 'https://studio.youtube.com/video/abc12345678/edit') in calls
+
+
+def test_missing_visibility_summary_does_not_fail_save(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page([('非公開', True, False)], visibility=None)
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    result = studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')
+    assert result['saved'] is True
+    assert result['privacy_check'] == 'unverified'
+
+
+def test_visibility_mismatch_fails_with_video_id(monkeypatch, tmp_path):
+    page, calls, save_ok = _upload_page([('非公開', True, False)], visibility='公開')
+    _stub_upload_env(monkeypatch, page, calls, save_ok)
+
+    with pytest.raises(RuntimeError, match=r'公開設定が 非公開 ではありません.*abc12345678'):
+        studio.upload(load_pack(_pack(tmp_path)), channel_id='UC123')

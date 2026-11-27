@@ -89,6 +89,7 @@ Ask Studio と同じプロファイルを使う。既存 Chrome に接続する�
 `upload_url(channel_id)` は `https://studio.youtube.com/channel/<id>/videos/upload` を組み立てる。ID 無しの `/videos/upload` は「エラーが発生しました」になることがあるため、引数か `UPLOAD_CHANNEL_ID` のどちらかを必須とする。
 
 `upload` の `publish` は既定 `False`。公開設定画面で選ぶラベルは `publish=True` のとき `公開`、それ以外は `非公開`。CLI では `--publish` を付けたときだけ `True` になる。1 日のアップロード上限を示す `LIMIT_MARKERS` を画面本文から検出したら `RuntimeError` で中断する。
+保存前は `_select_privacy()` が対象ラジオの存在と `aria-checked` を必須化し、選べなければ保存しない。テキストによる代替クリックは行わない。保存後は動画 ID を取得してから `/video/<id>/edit` の `#visibility-text` を best-effort で読み、一致すれば `privacy_check='verified'`、要素が無ければ `'unverified'`（警告のみで `saved=True` は維持）、不一致なら video ID 付きで失敗する。公開設定ラジオはダイアログ配下にあり得るので、保存後のラジオ再確認は行わない。
 
 ## 字幕の添付と公開
 
@@ -120,6 +121,7 @@ CDP 接続の失敗は 1 回の接続試行（15 秒）を単位とする。
   - `_video_id_from_url`、`_upload_captions` の添付・公開手順
   - `_stop_owned_chrome` が自分の PID だけを対象にすること
   - CDP 失敗時に、所有 Chrome が無ければ既存ブラウザを再起動しないこと、所有していれば 1 回だけ再起動すること
+  - `publish=False` の fail-closed（ラジオ不在／未選択／保存失敗時のテキスト代替なし）と保存後 `#visibility-text` の best-effort 確認
 - 実行コマンド（検証用 Python）:
   ```powershell
   & "C:\Users\neoen\AppData\Local\Programs\Python\Python312\python.exe" -m pytest tests/test_upload.py

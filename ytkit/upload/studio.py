@@ -151,6 +151,46 @@ def _upload_captions(pg, video_id, srt):
     print(f'  字幕を公開しました: {srt.name}')
 
 
+def _privacy_checked(pg, target):
+    """公開設定ラジオの状態。見つからなければ None（保存前の必須チェックで使う）。"""
+    rads = pg.locator('tp-yt-paper-radio-button')
+    for i in range(rads.count()):
+        r = rads.nth(i)
+        if r.is_visible() and r.inner_text().strip() == target:
+            return r.get_attribute('aria-checked') == 'true'
+    return None
+
+
+def _select_privacy(pg, target):
+    """保存前に target を選ぶ。見つからない／選べなければ保存しない。"""
+    checked = _privacy_checked(pg, target)
+    if checked is None:
+        raise RuntimeError(f'{target} のラジオが見つかりません。保存しません')
+    if not checked:
+        rads = pg.locator('tp-yt-paper-radio-button')
+        for i in range(rads.count()):
+            r = rads.nth(i)
+            if r.is_visible() and r.inner_text().strip() == target:
+                r.click()
+                break
+        pg.wait_for_timeout(3000)
+    if _privacy_checked(pg, target) is not True:
+        raise RuntimeError(f'{target} を選択できませんでした。保存しません')
+    print(f'  公開設定: {target}')
+
+
+def _verify_privacy(pg, target):
+    """保存後の公開範囲を #visibility-text で best-effort に確認する。"""
+    loc = pg.locator('#visibility-text')
+    if not loc.count():
+        return 'unverified'
+    try:
+        text = loc.first.inner_text().strip()
+    except Exception:
+        return 'unverified'
+    return 'verified' if target in text else 'mismatch'
+
+
 def upload(pack, slug='video', publish=False, dry_run=False, timeout=600,
            channel_id=None):
     """pack を YouTube Studio にアップロードして保存する。"""
@@ -256,29 +296,25 @@ def upload(pack, slug='video', publish=False, dry_run=False, timeout=600,
                 pg.wait_for_timeout(4000)
 
             target = '公開' if publish else '非公開'
-            rads = pg.locator('tp-yt-paper-radio-button')
-            for i in range(rads.count()):
-                r = rads.nth(i)
-                if r.is_visible() and r.inner_text().strip() == target:
-                    if r.get_attribute('aria-checked') != 'true':
-                        r.click()
-                    pg.wait_for_timeout(3000)
-                    print(f'  公開設定: {target}')
-                    break
+            _select_privacy(pg, target)
 
             if not _click_if_ready(pg, '#save-button', '保存', limit=60):
-                for label in ('公開', '保存', '完了'):
-                    btn = pg.get_by_text(label, exact=True)
-                    if btn.count() and btn.first.is_visible():
-                        btn.first.click()
-                        break
+                raise RuntimeError('保存ボタン(#save-button)が押せませんでした。公開設定を変更せず中断します')
             pg.wait_for_timeout(8000)
             video_id = _video_id(pg)
+            if not video_id:
+                raise RuntimeError('保存後に動画 ID が取得できませんでした。saved=True を返しません')
+            pg.goto(f'{STUDIO_URL}video/{video_id}/edit', wait_until='domcontentloaded')
+            pg.wait_for_timeout(3000)
+            privacy_check = _verify_privacy(pg, target)
+            if privacy_check == 'mismatch':
+                raise RuntimeError(
+                    f'保存後の公開設定が {target} ではありません（video_id={video_id}）。'
+                    'Studio で公開設定を確認してください'
+                )
             result = {'slug': slug, 'saved': True, 'publish': publish,
-                      'video_id': video_id}
+                      'video_id': video_id, 'privacy_check': privacy_check}
             if 'subtitles' in pack:
-                if not video_id:
-                    raise RuntimeError('字幕を添付するための video ID が取得できませんでした')
                 _upload_captions(pg, video_id, pack['subtitles'])
                 result['subtitles'] = 'published'
             return result
